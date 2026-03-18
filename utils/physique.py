@@ -1,4 +1,3 @@
-# utils/physique.py
 def calculer_trajectoire_parabolique(v0, angle_degres, t, g):
     pass
 
