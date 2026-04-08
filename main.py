@@ -154,6 +154,9 @@ class Game:
         self.shop_sel_equip: str | None = None
         self.shop_msg        = ""
         self.shop_msg_t      = 0.0
+        self.shop_seeds_bought: dict[str, int] = {}  # Track bought seeds inventory
+        self.shop_items_bought: dict[str, int] = {}  # Track bought shop items
+        self.debt_repayment_amount = 0  # Amount to repay selected by slider
 
         # Bilan data
         self.bilan_details:   list[dict] = []
@@ -161,6 +164,7 @@ class Game:
         self.bilan_sol_avant  = 0.0
         self.bilan_sol_apres  = 0.0
         self.bilan_t          = 0.0
+        self.has_unfinished_plants = False
 
         # Cached button rects from draw calls
         self._rects_menu:   dict[str, pygame.Rect] = {}
@@ -227,6 +231,36 @@ class Game:
                         self._msg("Graine retirée.")
                     self.epouvantails = [ep for ep in self.epouvantails if ep.slot_index != i]
                     return
+            # Sell item click (right-click on shop items)
+            for item_id in SHOP_ITEMS_ORDER:
+                if r.get(f"item_{item_id}", pygame.Rect(0, 0, 0, 0)).collidepoint(pos):
+                    self._sell(item_id)
+                    return
+            return
+
+        # Debt repayment slider click
+        if "debt_slider" in r:
+            slider_rect = r["debt_slider"]
+            if slider_rect.collidepoint(pos):
+                # Update debt repayment amount based on slider position
+                relative_x = pos[0] - slider_rect.x
+                ratio = max(0, min(1, relative_x / slider_rect.width))
+                self.debt_repayment_amount = int(self.joueur.argent * ratio)
+                return
+
+        # Debt repayment reset button
+        if "debt_reset" in r and r["debt_reset"].collidepoint(pos):
+            self.debt_repayment_amount = 0
+            return
+
+        # Debt repayment confirm button
+        if "debt_confirm" in r and r["debt_confirm"].collidepoint(pos):
+            if self.debt_repayment_amount > 0:
+                if self.joueur.rembourser_dette(self.debt_repayment_amount):
+                    self._msg(f"Dette remboursée : +{self.debt_repayment_amount} €")
+                    self.debt_repayment_amount = 0
+                else:
+                    self._msg("Pas assez d'argent !")
             return
 
         # Start button
@@ -277,6 +311,8 @@ class Game:
                 self._msg(f"Pas assez d'argent ! Besoin : {d['cout']} €"); return
             self.joueur.acheter(d["cout"])
             self.shop_sel_seed = item_id
+            # Track the bought seed
+            self.shop_seeds_bought[item_id] = self.shop_seeds_bought.get(item_id, 0) + 1
             self._msg(f"{d['nom']} acheté — cliquez sur un slot.")
         else:
             d = BOUTIQUE_ITEMS[item_id]
@@ -287,18 +323,75 @@ class Game:
                 case "munitions":
                     q = d["quantite"]
                     self.joueur.munitions += q
+                    self.shop_items_bought[item_id] = self.shop_items_bought.get(item_id, 0) + 1
                     self._msg(f"+{q} obus de compost !")
                 case "arme":
                     q = d["quantite"]
                     self.joueur.passages_aeriens += q
+                    self.shop_items_bought[item_id] = self.shop_items_bought.get(item_id, 0) + 1
                     self._msg(f"+{q} passage(s) aérien(s) !")
                 case "sol":
                     m = d["montant_sol"]
                     self.sol.soigner(m)
+                    self.shop_items_bought[item_id] = self.shop_items_bought.get(item_id, 0) + 1
                     self._msg(f"Sol soigné +{m}% !")
                 case "defense":
                     self.shop_sel_equip = "epouvantail"
+                    self.shop_items_bought[item_id] = self.shop_items_bought.get(item_id, 0) + 1
                     self._msg("Épouvantail acheté — cliquez sur un slot.")
+
+    def _sell(self, item_id: str) -> None:
+        """Sell an item back to the shop for its full purchase price."""
+        if item_id in PLANTES_DATA:
+            d = PLANTES_DATA[item_id]
+            # Check if we actually have this seed in stock
+            if self.shop_seeds_bought.get(item_id, 0) <= 0:
+                self._msg(f"Vous n'avez pas de {d['nom']} à revendre !")
+                return
+            refund = d["cout"]
+            self.joueur.gagner_argent(refund)
+            self.shop_seeds_bought[item_id] -= 1
+            self._msg(f"{d['nom']} revendu : +{refund} €")
+        else:
+            d = BOUTIQUE_ITEMS[item_id]
+            refund = d["cout"]
+            match d["categorie"]:
+                case "munitions":
+                    q = d["quantite"]
+                    if self.joueur.munitions >= q and self.shop_items_bought.get(item_id, 0) > 0:
+                        self.joueur.munitions -= q
+                        self.shop_items_bought[item_id] -= 1
+                        self.joueur.gagner_argent(refund)
+                        self._msg(f"-{q} obus : +{refund} €")
+                    elif self.shop_items_bought.get(item_id, 0) <= 0:
+                        self._msg(f"Vous n'avez pas acheté de {d['nom']} !")
+                    else:
+                        self._msg("Pas assez de munitions à revendre !")
+                case "arme":
+                    q = d["quantite"]
+                    if self.joueur.passages_aeriens >= q and self.shop_items_bought.get(item_id, 0) > 0:
+                        self.joueur.passages_aeriens -= q
+                        self.shop_items_bought[item_id] -= 1
+                        self.joueur.gagner_argent(refund)
+                        self._msg(f"-{q} passage(s) aérien(s) : +{refund} €")
+                    elif self.shop_items_bought.get(item_id, 0) <= 0:
+                        self._msg(f"Vous n'avez pas acheté de {d['nom']} !")
+                    else:
+                        self._msg("Pas assez de passages aériens !")
+                case "sol":
+                    if self.shop_items_bought.get(item_id, 0) > 0:
+                        self.shop_items_bought[item_id] -= 1
+                        self.joueur.gagner_argent(refund)
+                        self._msg(f"Crédité : +{refund} €")
+                    else:
+                        self._msg(f"Vous n'avez pas acheté de {d['nom']} !")
+                case "defense":
+                    if self.shop_items_bought.get(item_id, 0) > 0:
+                        self.shop_items_bought[item_id] -= 1
+                        self.joueur.gagner_argent(refund)
+                        self._msg(f"Crédit revente : +{refund} €")
+                    else:
+                        self._msg("Vous n'avez pas acheté d'épouvantail !")
 
     def _msg(self, text: str, dur: float = 2.8) -> None:
         self.shop_msg   = text
@@ -352,29 +445,39 @@ class Game:
         self.bilan_details   = []
         self.bilan_gain      = 0
 
-        for plante in self.slots:
+        # Track which plants are finished (mûr or dead)
+        has_unfinished_plants = False
+
+        for i, plante in enumerate(self.slots):
             if plante is None:
                 continue
             if plante.est_morte():
                 row = {"nom": plante.nom, "growth": plante.growth,
                        "valeur": plante.valeur, "gagne": 0, "etat": "Détruite"}
+                self.bilan_details.append(row)
+                # Remove dead plants from slots
+                self.slots[i] = None
+                self.slot_types[i] = None
             elif plante.est_recoltable():
                 g = plante.vendre()
                 self.joueur.gagner_argent(g)
                 self.bilan_gain += g
                 row = {"nom": plante.nom, "growth": plante.growth,
                        "valeur": plante.valeur, "gagne": g, "etat": "Récoltée"}
+                self.bilan_details.append(row)
+                # Remove harvested plants from slots
+                self.slots[i] = None
+                self.slot_types[i] = None
             else:
+                # Plant is still growing - don't harvest it yet
                 row = {"nom": plante.nom, "growth": plante.growth,
                        "valeur": plante.valeur, "gagne": 0, "etat": "Pas mûre"}
-            self.bilan_details.append(row)
+                self.bilan_details.append(row)
+                has_unfinished_plants = True
 
         self.bilan_sol_apres = self.sol.get_sante()
         self.bilan_t         = 0.0
-        # Clear field for next season
-        self.slots      = [None] * NB_SLOTS
-        self.slot_types = [None] * NB_SLOTS
-        self.epouvantails.clear()
+        self.has_unfinished_plants = has_unfinished_plants
         self.etat = ETAT_BILAN
 
     def _end_bilan(self) -> None:
@@ -385,18 +488,38 @@ class Game:
             self.etat = ETAT_DEFAITE
             return
 
+        # If plants are still growing, continue the defense phase
+        if self.has_unfinished_plants:
+            # Start a new defense phase for the same season WITHOUT recreating plants
+            self.ennemis.clear()
+            self.projectiles.clear()
+            self.explosions.clear()
+            self.floats.clear()
+            self.avion      = Avion()
+            self._avion_fired = False
+            self.defense    = DefenseManager(self.joueur.saison)
+            self.etat       = ETAT_ACTION
+            return
+
         if saison >= 10:
-            if self.joueur.argent >= self.joueur.dette and self.sol.get_sante() > 0:
+            if self.joueur.is_dette_payee() and self.sol.get_sante() > 0:
                 self.etat = ETAT_VICTOIRE
             else:
                 self.defaite_raison = "faillite"
                 self.etat = ETAT_DEFAITE
             return
 
+        # Move to next season
         self.joueur.saison += 1
         self.shop_sel_seed  = None
         self.shop_sel_equip = None
         self.shop_msg       = ""
+        self.shop_seeds_bought = {}  # Reset bought seeds for new season
+        self.shop_items_bought = {}  # Reset bought shop items for new season
+        # Clear field for next season
+        self.slots      = [None] * NB_SLOTS
+        self.slot_types = [None] * NB_SLOTS
+        self.epouvantails.clear()
         self.etat = ETAT_BOUTIQUE
 
     # ── Update ────────────────────────────────────────────────────────────────
@@ -496,6 +619,7 @@ class Game:
                     screen, self.joueur, self.sol,
                     self.slot_types, self.epouvantails,
                     self.shop_sel_seed, self.shop_sel_equip, self.shop_msg,
+                    self.debt_repayment_amount
                 )
             case "action":
                 self._draw_action(screen)

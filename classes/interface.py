@@ -371,9 +371,9 @@ def draw_hud(surf: pygame.Surface, joueur, sol, saison: int) -> None:
     _txt(surf, "ARGENT", 10, C_GRAY, (x + 8, 9))
     _txt(surf, f"{joueur.argent:,} €".replace(",", " "), 22, C_GOLD,
          (x + 8, 22), bold=True, shadow=True)
-    dette = max(0, joueur.dette - joueur.argent)
-    dcol = C_RED if dette > 0 else C_LIME
-    _txt(surf, f"Dette: {dette:,} €".replace(",", " "), 11, dcol, (x + 8, 47))
+    dette_restante = joueur.get_dette_restante()
+    dcol = C_RED if dette_restante > 0 else C_LIME
+    _txt(surf, f"Dette: {dette_restante:,} €".replace(",", " "), 11, dcol, (x + 8, 47))
 
     # ─ Soil bar block ─
     x = 300
@@ -506,7 +506,7 @@ def draw_menu(surf: pygame.Surface, t: float) -> dict[str, pygame.Rect]:
 
 def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
                   epouvantails: list, sel_seed: str | None, sel_equip: str | None,
-                  msg: str) -> dict[str, pygame.Rect]:
+                  msg: str, debt_repayment_amount: int = 0) -> dict[str, pygame.Rect]:
     rects: dict[str, pygame.Rect] = {}
 
     surf.fill(C_BG)
@@ -578,9 +578,9 @@ def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
            border=1, bcol=C_BORDER)
     _txt(surf, f"💰  {joueur.argent:,} €".replace(",", " "), 18, C_GOLD,
          (22, y_s + 8), bold=True)
-    dette = max(0, joueur.dette - joueur.argent)
-    dc = C_RED if dette > 0 else C_LIME
-    _txt(surf, f"Dette restante : {dette:,} €".replace(",", " "), 13, dc, (22, y_s + 32))
+    dette_restante = joueur.get_dette_restante()
+    dc = C_RED if dette_restante > 0 else C_LIME
+    _txt(surf, f"Dette restante : {dette_restante:,} €".replace(",", " "), 13, dc, (22, y_s + 32))
     _txt(surf, f"Obus : {joueur.munitions}   Avion : {joueur.passages_aeriens}",
          13, C_WHITE, (22, y_s + 50))
 
@@ -616,6 +616,8 @@ def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
     # ── Right panel: shop ─────────────────────────────────────────────────────
     _txt(surf, "BOUTIQUE", 22, C_GOLD, (SHOP_SPLIT_X + (LARGEUR - SHOP_SPLIT_X) // 2, 22),
          center=True, bold=True, shadow=True)
+    _txt(surf, "(clic droit = revendre)", 11, C_GRAY, (SHOP_SPLIT_X + (LARGEUR - SHOP_SPLIT_X) // 2, 46),
+         center=True)
 
     cat_icons = {"munitions": "💣", "arme": "✈️", "sol": "🌱", "defense": "🪆"}
     cat_cols  = {"munitions": C_ORANGE, "arme": C_RED, "sol": C_LIME, "defense": C_GOLD}
@@ -664,6 +666,53 @@ def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
                bcol=C_LIME if affordable else C_RED)
         _txt(surf, f"{cout} €", 15, C_GOLD if affordable else C_RED,
              price_r.center, center=True, bold=True)
+
+    # ── Debt repayment panel ──────────────────────────────────────────────────
+    debt_panel_y = HAUTEUR - 200
+    debt_panel = pygame.Rect(SHOP_SPLIT_X + 12, debt_panel_y, LARGEUR - SHOP_SPLIT_X - 24, 110)
+    _rrect(surf, (35, 25, 25), debt_panel, radius=10, border=2, bcol=(70, 30, 30))
+
+    # Title
+    _txt(surf, "💳  REMBOURSER LA DETTE", 14, C_RED,
+         (debt_panel.centerx, debt_panel.y + 8), center=True, bold=True)
+
+    # Slider
+    slider_y = debt_panel.y + 32
+    slider_w = debt_panel.width - 24
+    slider_rect = pygame.Rect(debt_panel.x + 12, slider_y, slider_w, 20)
+    rects["debt_slider"] = slider_rect
+
+    # Slider background
+    pygame.draw.rect(surf, (40, 20, 20), slider_rect, border_radius=5)
+    pygame.draw.rect(surf, (100, 40, 40), slider_rect, 2, border_radius=5)
+
+    # Slider fill (progress)
+    if slider_w > 0 and joueur.argent > 0:
+        fill_w = int(slider_w * (debt_repayment_amount / joueur.argent))
+        fill_rect = pygame.Rect(slider_rect.x, slider_rect.y, fill_w, slider_rect.height)
+        pygame.draw.rect(surf, (200, 80, 80), fill_rect, border_radius=5)
+
+    # Current amount
+    _txt(surf, f"{debt_repayment_amount:,} € / {joueur.argent:,} €".replace(",", " "),
+         12, C_GOLD, (debt_panel.centerx, slider_y + 30), center=True)
+
+    # Confirm button
+    confirm_btn = pygame.Rect(debt_panel.x + 12, debt_panel.y + 72,
+                              slider_w // 2 - 6, 28)
+    rects["debt_confirm"] = confirm_btn
+    confirm_hover = confirm_btn.collidepoint(pygame.mouse.get_pos())
+    confirm_col = (80, 150, 80) if confirm_hover else (50, 110, 50)
+    _rrect(surf, confirm_col, confirm_btn, radius=6, border=2, bcol=(20, 60, 20))
+    _txt(surf, "✓ Confirmer", 12, C_WHITE, confirm_btn.center, center=True, bold=True)
+
+    # Reset button
+    reset_btn = pygame.Rect(debt_panel.x + 12 + slider_w // 2 + 6, debt_panel.y + 72,
+                            slider_w // 2 - 6, 28)
+    rects["debt_reset"] = reset_btn
+    reset_hover = reset_btn.collidepoint(pygame.mouse.get_pos())
+    reset_col = (150, 80, 80) if reset_hover else (110, 50, 50)
+    _rrect(surf, reset_col, reset_btn, radius=6, border=2, bcol=(60, 20, 20))
+    _txt(surf, "✕ Annuler", 12, C_WHITE, reset_btn.center, center=True, bold=True)
 
     # Right start button
     btn2_y = HAUTEUR - 72

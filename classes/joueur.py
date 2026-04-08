@@ -7,6 +7,7 @@ class Joueur:
     def __init__(self):
         self.argent = ARGENT_DEPART
         self.dette = DETTE_CIBLE
+        self.dette_remboursee = 0  # Money paid towards debt
         self.munitions = MUNITIONS_DEPART
         self.passages_aeriens = 0
         self.score = 0
@@ -25,8 +26,21 @@ class Joueur:
         self.argent += montant
         self.score += montant
 
+    def rembourser_dette(self, montant):
+        """Pay towards debt. Money is permanently spent."""
+        if self.argent >= montant and montant > 0:
+            self.argent -= montant
+            self.dette_remboursee += montant
+            return True
+        return False
+
     def get_dette_restante(self):
-        return max(0, self.dette - self.argent)
+        """Return remaining debt to pay."""
+        return max(0, self.dette - self.dette_remboursee)
+
+    def is_dette_payee(self):
+        """Check if debt is fully paid."""
+        return self.dette_remboursee >= self.dette
 
     def get_statut(self):
         if self.argent >= self.dette:
@@ -39,6 +53,7 @@ class Joueur:
         return {
             "argent": self.argent,
             "dette": self.dette,
+            "dette_remboursee": self.dette_remboursee,
             "munitions": self.munitions,
             "passages_aeriens": self.passages_aeriens,
             "score": self.score,
@@ -50,6 +65,7 @@ class Joueur:
         j = cls()
         j.argent = d.get("argent", ARGENT_DEPART)
         j.dette = d.get("dette", DETTE_CIBLE)
+        j.dette_remboursee = d.get("dette_remboursee", 0)
         j.munitions = d.get("munitions", MUNITIONS_DEPART)
         j.passages_aeriens = d.get("passages_aeriens", 0)
         j.score = d.get("score", 0)
