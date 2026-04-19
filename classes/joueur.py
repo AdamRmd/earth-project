@@ -1,4 +1,4 @@
-# classes/joueur.py — Player data class
+    # classes/joueur.py — Player data class
 
 from settings import ARGENT_DEPART, DETTE_CIBLE, MUNITIONS_DEPART
 
