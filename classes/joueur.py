@@ -43,7 +43,7 @@ class Joueur:
         return self.dette_remboursee >= self.dette
 
     def get_statut(self):
-        if self.is_dette_payee():
+        if self.argent >= self.dette:
             return "VICTOIRE"
         elif self.argent <= 0 and self.saison > 10:
             return "FAILLITE"
