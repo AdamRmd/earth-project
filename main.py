@@ -1,7 +1,7 @@
 # main.py — Green Rush : La Guerre du Potager  (v2)
 # Professional game loop with full state machine
+
 from __future__ import annotations
-from classes.ferme import Ferme
 import sys
 import math
 import random
@@ -18,8 +18,8 @@ from settings import (
 )
 from classes.joueur    import Joueur
 from classes.sol       import Sol
+from classes.plantes   import Plante, Epouvantail
 from classes.ennemies  import creer_ennemi
-from classes.defense   import DefenseManager
 from classes.projectile import ObuseCompost
 from classes.avion     import Avion
 from classes.interface import (
@@ -40,6 +40,79 @@ ETAT_VICTOIRE = "victoire"
 ETAT_DEFAITE  = "defaite"
 
 
+# ── Defense manager (one per season) ──────────────────────────────────────────
+class DefenseManager:
+    """
+    Manages enemy spawning for ONE season's defense phase.
+    All enemies arrive in a continuous stream — no wave UI, just seasons.
+    Difficulty scales with season number.
+    """
+    SPAWN_DELAY_BASE = 1.4   # seconds between spawns at season 1
+    ENTRY_DELAY      = 2.2   # initial pause before first enemy
+
+    def __init__(self, saison: int) -> None:
+        self.saison       = saison
+        self.spawn_queue  = self._build_queue(saison)
+        self.spawn_timer  = self.ENTRY_DELAY
+        self.enemies_ref: list = []
+        self.state        = "spawning"  # spawning | waiting | done
+        # Banner shown at start of defense
+        self.banner_text  = f"SAISON {saison}  —  DÉFENDEZ VOS CULTURES !"
+        self.banner_alpha = 255.0
+
+    # ── Queue building ────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_queue(saison: int) -> list[str]:
+        """Return a flat shuffled list of enemy types for this season."""
+        queue: list[str] = []
+        # Pull all vague configs and merge them into one continuous stream
+        nb = get_nb_vagues(saison)
+        for v in range(1, nb + 1):
+            for (etype, count) in get_vague_config(saison, v):
+                queue.extend([etype] * count)
+        random.shuffle(queue)
+        return queue
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def sync(self, enemies: list) -> None:
+        self.enemies_ref = enemies
+
+    @property
+    def spawn_delay(self) -> float:
+        """Spawn delay decreases as season progresses (more pressure)."""
+        factor = max(0.45, 1.0 - (self.saison - 1) * 0.06)
+        return self.SPAWN_DELAY_BASE * factor
+
+    # ── Update ────────────────────────────────────────────────────────────────
+
+    def update(self, dt: float) -> list:
+        """Return list of new enemies to add this frame."""
+        new: list = []
+
+        if self.banner_alpha > 0:
+            self.banner_alpha = max(0.0, self.banner_alpha - 180 * dt)
+
+        if self.state == "spawning":
+            self.spawn_timer -= dt
+            if self.spawn_timer <= 0 and self.spawn_queue:
+                etype = self.spawn_queue.pop(0)
+                new.append(creer_ennemi(etype))
+                self.spawn_timer = self.spawn_delay + random.uniform(-0.2, 0.35)
+            if not self.spawn_queue:
+                self.state = "waiting"
+
+        elif self.state == "waiting":
+            alive = [e for e in self.enemies_ref if not e.est_mort() and e.x > -80]
+            if not alive:
+                self.state = "done"
+
+        return new
+
+    def is_done(self) -> bool:
+        return self.state == "done"
+
 
 # ── Main game class ────────────────────────────────────────────────────────────
 class Game:
@@ -54,6 +127,10 @@ class Game:
         self.sol.sante_globale = float(SOL_DEPART)
         self.sol.segments      = [float(SOL_DEPART)] * self.sol.NB_SEGMENTS
 
+        # Persistent across boutique/action
+        self.slot_types:   list[str | None] = [None] * NB_SLOTS
+        self.slots:        list[Plante | None] = [None] * NB_SLOTS
+        self.epouvantails: list[Epouvantail]   = []
 
         # Action objects
         self.ennemis:      list = []
@@ -72,7 +149,14 @@ class Game:
         self.etat           = ETAT_MENU
         self.defaite_raison = ""
 
-        self.ferme = Ferme(self.joueur, self.sol)
+        # Boutique UI state
+        self.shop_sel_seed:  str | None = None
+        self.shop_sel_equip: str | None = None
+        self.shop_msg        = ""
+        self.shop_msg_t      = 0.0
+        self.shop_seeds_bought: dict[str, int] = {}  # Track bought seeds inventory
+        self.shop_items_bought: dict[str, int] = {}  # Track bought shop items
+        self.debt_repayment_amount = 0  # Amount to repay selected by slider
 
         # Bilan data
         self.bilan_details:   list[dict] = []
@@ -116,8 +200,7 @@ class Game:
                 if "jouer" in self._rects_menu and self._rects_menu["jouer"].collidepoint(pos):
                     self.etat = ETAT_BOUTIQUE
             case "boutique":
-                if self.ferme.on_click(pos, btn, self._rects_shop) == "start":
-                    self._start_action()
+                self._shop_click(pos, btn)
             case "action":
                 if btn == 1:
                     self._shoot(pos)
@@ -129,6 +212,190 @@ class Game:
             case _ if self.etat in (ETAT_VICTOIRE, ETAT_DEFAITE):
                 if "rejouer" in self._rects_end and self._rects_end["rejouer"].collidepoint(pos):
                     self._reset()
+
+    # ── Shop interaction ──────────────────────────────────────────────────────
+
+    def _shop_click(self, pos: tuple[int, int], btn: int) -> None:
+        r = self._rects_shop
+
+        if btn == 3:
+            # Cancel selection or remove from slot
+            if self.shop_sel_seed or self.shop_sel_equip:
+                self.shop_sel_seed = self.shop_sel_equip = None
+                return
+            for i in range(NB_SLOTS):
+                if r.get(f"slot_{i}", pygame.Rect(0, 0, 0, 0)).collidepoint(pos):
+                    if self.slot_types[i]:
+                        self.slot_types[i] = None
+                        self.slots[i] = None
+                        self._msg("Graine retirée.")
+                    self.epouvantails = [ep for ep in self.epouvantails if ep.slot_index != i]
+                    return
+            # Sell item click (right-click on shop items)
+            for item_id in SHOP_ITEMS_ORDER:
+                if r.get(f"item_{item_id}", pygame.Rect(0, 0, 0, 0)).collidepoint(pos):
+                    self._sell(item_id)
+                    return
+            return
+
+        # Debt repayment slider click
+        if "debt_slider" in r:
+            slider_rect = r["debt_slider"]
+            if slider_rect.collidepoint(pos):
+                # Update debt repayment amount based on slider position
+                relative_x = pos[0] - slider_rect.x
+                ratio = max(0, min(1, relative_x / slider_rect.width))
+                self.debt_repayment_amount = int(self.joueur.argent * ratio)
+                return
+
+        # Debt repayment reset button
+        if "debt_reset" in r and r["debt_reset"].collidepoint(pos):
+            self.debt_repayment_amount = 0
+            return
+
+        # Debt repayment confirm button
+        if "debt_confirm" in r and r["debt_confirm"].collidepoint(pos):
+            if self.debt_repayment_amount > 0:
+                if self.joueur.rembourser_dette(self.debt_repayment_amount):
+                    self._msg(f"Dette remboursée : +{self.debt_repayment_amount} €")
+                    self.debt_repayment_amount = 0
+                else:
+                    self._msg("Pas assez d'argent !")
+            return
+
+        # Start button
+        _empty = pygame.Rect(0, 0, 0, 0)
+        if (r.get("start",  _empty).collidepoint(pos) or
+                r.get("start2", _empty).collidepoint(pos)):
+            if any(s for s in self.slot_types):
+                self._start_action()
+            else:
+                self._msg("Achetez d'abord des graines !")
+            return
+
+        # Slot click
+        for i in range(NB_SLOTS):
+            if r.get(f"slot_{i}", pygame.Rect(0, 0, 0, 0)).collidepoint(pos):
+                self._place_in_slot(i)
+                return
+
+        # Shop item click
+        for item_id in SHOP_ITEMS_ORDER:
+            if r.get(f"item_{item_id}", pygame.Rect(0, 0, 0, 0)).collidepoint(pos):
+                self._buy(item_id)
+                return
+
+    def _place_in_slot(self, i: int) -> None:
+        if self.shop_sel_seed:
+            if self.slot_types[i]:
+                self._msg("Slot occupé ! Clic droit pour retirer.")
+                return
+            self.slot_types[i] = self.shop_sel_seed
+            name = PLANTES_DATA[self.shop_sel_seed]["nom"]
+            self._msg(f"{name} planté dans le slot {i + 1} !")
+            self.shop_sel_seed = None
+        elif self.shop_sel_equip == "epouvantail":
+            if any(ep.slot_index == i for ep in self.epouvantails):
+                self._msg("Épouvantail déjà placé ici !")
+                return
+            self.epouvantails.append(Epouvantail(i))
+            self._msg(f"Épouvantail placé au slot {i + 1} !")
+            self.shop_sel_equip = None
+        else:
+            self._msg("Sélectionnez d'abord un article.")
+
+    def _buy(self, item_id: str) -> None:
+        if item_id in PLANTES_DATA:
+            d = PLANTES_DATA[item_id]
+            if not self.joueur.peut_acheter(d["cout"]):
+                self._msg(f"Pas assez d'argent ! Besoin : {d['cout']} €"); return
+            self.joueur.acheter(d["cout"])
+            self.shop_sel_seed = item_id
+            # Track the bought seed
+            self.shop_seeds_bought[item_id] = self.shop_seeds_bought.get(item_id, 0) + 1
+            self._msg(f"{d['nom']} acheté — cliquez sur un slot.")
+        else:
+            d = BOUTIQUE_ITEMS[item_id]
+            if not self.joueur.peut_acheter(d["cout"]):
+                self._msg(f"Pas assez d'argent ! Besoin : {d['cout']} €"); return
+            self.joueur.acheter(d["cout"])
+            match d["categorie"]:
+                case "munitions":
+                    q = d["quantite"]
+                    self.joueur.munitions += q
+                    self.shop_items_bought[item_id] = self.shop_items_bought.get(item_id, 0) + 1
+                    self._msg(f"+{q} obus de compost !")
+                case "arme":
+                    q = d["quantite"]
+                    self.joueur.passages_aeriens += q
+                    self.shop_items_bought[item_id] = self.shop_items_bought.get(item_id, 0) + 1
+                    self._msg(f"+{q} passage(s) aérien(s) !")
+                case "sol":
+                    m = d["montant_sol"]
+                    self.sol.soigner(m)
+                    self.shop_items_bought[item_id] = self.shop_items_bought.get(item_id, 0) + 1
+                    self._msg(f"Sol soigné +{m}% !")
+                case "defense":
+                    self.shop_sel_equip = "epouvantail"
+                    self.shop_items_bought[item_id] = self.shop_items_bought.get(item_id, 0) + 1
+                    self._msg("Épouvantail acheté — cliquez sur un slot.")
+
+    def _sell(self, item_id: str) -> None:
+        """Sell an item back to the shop for its full purchase price."""
+        if item_id in PLANTES_DATA:
+            d = PLANTES_DATA[item_id]
+            # Check if we actually have this seed in stock
+            if self.shop_seeds_bought.get(item_id, 0) <= 0:
+                self._msg(f"Vous n'avez pas de {d['nom']} à revendre !")
+                return
+            refund = d["cout"]
+            self.joueur.gagner_argent(refund)
+            self.shop_seeds_bought[item_id] -= 1
+            self._msg(f"{d['nom']} revendu : +{refund} €")
+        else:
+            d = BOUTIQUE_ITEMS[item_id]
+            refund = d["cout"]
+            match d["categorie"]:
+                case "munitions":
+                    q = d["quantite"]
+                    if self.joueur.munitions >= q and self.shop_items_bought.get(item_id, 0) > 0:
+                        self.joueur.munitions -= q
+                        self.shop_items_bought[item_id] -= 1
+                        self.joueur.gagner_argent(refund)
+                        self._msg(f"-{q} obus : +{refund} €")
+                    elif self.shop_items_bought.get(item_id, 0) <= 0:
+                        self._msg(f"Vous n'avez pas acheté de {d['nom']} !")
+                    else:
+                        self._msg("Pas assez de munitions à revendre !")
+                case "arme":
+                    q = d["quantite"]
+                    if self.joueur.passages_aeriens >= q and self.shop_items_bought.get(item_id, 0) > 0:
+                        self.joueur.passages_aeriens -= q
+                        self.shop_items_bought[item_id] -= 1
+                        self.joueur.gagner_argent(refund)
+                        self._msg(f"-{q} passage(s) aérien(s) : +{refund} €")
+                    elif self.shop_items_bought.get(item_id, 0) <= 0:
+                        self._msg(f"Vous n'avez pas acheté de {d['nom']} !")
+                    else:
+                        self._msg("Pas assez de passages aériens !")
+                case "sol":
+                    if self.shop_items_bought.get(item_id, 0) > 0:
+                        self.shop_items_bought[item_id] -= 1
+                        self.joueur.gagner_argent(refund)
+                        self._msg(f"Crédité : +{refund} €")
+                    else:
+                        self._msg(f"Vous n'avez pas acheté de {d['nom']} !")
+                case "defense":
+                    if self.shop_items_bought.get(item_id, 0) > 0:
+                        self.shop_items_bought[item_id] -= 1
+                        self.joueur.gagner_argent(refund)
+                        self._msg(f"Crédit revente : +{refund} €")
+                    else:
+                        self._msg("Vous n'avez pas acheté d'épouvantail !")
+
+    def _msg(self, text: str, dur: float = 2.8) -> None:
+        self.shop_msg   = text
+        self.shop_msg_t = dur
 
     # ── Action: shoot & plane ─────────────────────────────────────────────────
 
@@ -160,9 +427,9 @@ class Game:
     # ── Phase transitions ──────────────────────────────────────────────────────
 
     def _start_action(self) -> None:
-        # On demande à la ferme de préparer le terrain
-        self.ferme.preparer_plantes()
-
+        for i in range(NB_SLOTS):
+            self.slots[i] = Plante(self.slot_types[i], i, self.sol) \
+                            if self.slot_types[i] else None
         self.ennemis.clear()
         self.projectiles.clear()
         self.explosions.clear()
@@ -181,7 +448,7 @@ class Game:
         # Track which plants are finished (mûr or dead)
         has_unfinished_plants = False
 
-        for i, plante in enumerate(self.ferme.slots):
+        for i, plante in enumerate(self.slots):
             if plante is None:
                 continue
             if plante.est_morte():
@@ -189,8 +456,8 @@ class Game:
                        "valeur": plante.valeur, "gagne": 0, "etat": "Détruite"}
                 self.bilan_details.append(row)
                 # Remove dead plants from slots
-                self.ferme.slots[i] = None
-                self.ferme.slot_types[i] = None
+                self.slots[i] = None
+                self.slot_types[i] = None
             elif plante.est_recoltable():
                 g = plante.vendre()
                 self.joueur.gagner_argent(g)
@@ -199,8 +466,8 @@ class Game:
                        "valeur": plante.valeur, "gagne": g, "etat": "Récoltée"}
                 self.bilan_details.append(row)
                 # Remove harvested plants from slots
-                self.ferme.slots[i] = None
-                self.ferme.slot_types[i] = None
+                self.slots[i] = None
+                self.slot_types[i] = None
             else:
                 # Plant is still growing - don't harvest it yet
                 row = {"nom": plante.nom, "growth": plante.growth,
@@ -216,26 +483,24 @@ class Game:
     def _end_bilan(self) -> None:
         saison = self.joueur.saison
 
-        # 1. Vérification de la santé du sol (Défaite par écocide)
         if self.sol.get_sante() <= 0:
             self.defaite_raison = "ecocide"
             self.etat = ETAT_DEFAITE
             return
 
-        # 2. Gestion des plantes qui n'ont pas fini de pousser
-        # On relance une phase d'action pour la même saison
+        # If plants are still growing, continue the defense phase
         if self.has_unfinished_plants:
+            # Start a new defense phase for the same season WITHOUT recreating plants
             self.ennemis.clear()
             self.projectiles.clear()
             self.explosions.clear()
             self.floats.clear()
-            self.avion = Avion()
+            self.avion      = Avion()
             self._avion_fired = False
-            self.defense = DefenseManager(self.joueur.saison)
-            self.etat = ETAT_ACTION
+            self.defense    = DefenseManager(self.joueur.saison)
+            self.etat       = ETAT_ACTION
             return
 
-        # 3. Vérification de la fin de partie (Saison 10 terminée)
         if saison >= 10:
             if self.joueur.is_dette_payee() and self.sol.get_sante() > 0:
                 self.etat = ETAT_VICTOIRE
@@ -244,17 +509,17 @@ class Game:
                 self.etat = ETAT_DEFAITE
             return
 
-        # 4. Passage à la saison suivante
+        # Move to next season
         self.joueur.saison += 1
-
-        # On utilise les méthodes de la classe Ferme pour tout nettoyer
-        # reset_saison s'occupe des messages, sélections et compteurs d'achats
-        self.ferme.reset_saison()
-
-        # vider_terrain s'occupe de vider les slots, types de graines et épouvantails
-        self.ferme.vider_terrain()
-
-        # Retour à la boutique pour préparer la nouvelle saison
+        self.shop_sel_seed  = None
+        self.shop_sel_equip = None
+        self.shop_msg       = ""
+        self.shop_seeds_bought = {}  # Reset bought seeds for new season
+        self.shop_items_bought = {}  # Reset bought shop items for new season
+        # Clear field for next season
+        self.slots      = [None] * NB_SLOTS
+        self.slot_types = [None] * NB_SLOTS
+        self.epouvantails.clear()
         self.etat = ETAT_BOUTIQUE
 
     # ── Update ────────────────────────────────────────────────────────────────
@@ -266,8 +531,10 @@ class Game:
 
         match self.etat:
             case "boutique":
-                # On dit simplement à la ferme de mettre à jour sa logique interne
-                self.ferme.update(dt)
+                if self.shop_msg_t > 0:
+                    self.shop_msg_t -= dt
+                    if self.shop_msg_t <= 0:
+                        self.shop_msg = ""
             case "action":
                 self._update_action(dt)
             case "bilan":
@@ -280,8 +547,8 @@ class Game:
         self.defense.sync(self.ennemis)
 
         # ── Plants grow ───────────────────────────────────────────────────────
-        active_plants = [p for p in self.ferme.slots if p is not None and not p.est_morte()]
-        for p in self.ferme.slots:
+        active_plants = [p for p in self.slots if p is not None and not p.est_morte()]
+        for p in self.slots:
             if p is not None:
                 p.pousser(dt, self.sol.get_sante())
 
@@ -289,7 +556,7 @@ class Game:
         for e in self.ennemis:
             if e.est_mort():
                 continue
-            e.deplacer(dt, active_plants, self.ferme.epouvantails)
+            e.deplacer(dt, active_plants, self.epouvantails)
             if e.mange and e.cible is not None:
                 e.manger(e.cible, dt)
 
@@ -350,10 +617,9 @@ class Game:
             case "boutique":
                 self._rects_shop = draw_boutique(
                     screen, self.joueur, self.sol,
-                    self.ferme.slot_types, self.ferme.epouvantails,  # On pioche dans ferme
-                    self.ferme.sel_seed, self.ferme.sel_equip,  # On pioche dans ferme
-                    self.ferme.msg,  # On pioche dans ferme
-                    self.ferme.debt_repayment_amount
+                    self.slot_types, self.epouvantails,
+                    self.shop_sel_seed, self.shop_sel_equip, self.shop_msg,
+                    self.debt_repayment_amount
                 )
             case "action":
                 self._draw_action(screen)
@@ -390,11 +656,11 @@ class Game:
         draw_mortier(screen, mx, my)
 
         # Scarecrows
-        for ep in self.ferme.epouvantails:
+        for ep in self.epouvantails:
             ep.draw(screen)
 
         # Plants
-        for p in self.ferme.slots:
+        for p in self.slots:
             if p is not None:
                 p.draw(screen)
 

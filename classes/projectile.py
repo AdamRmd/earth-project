@@ -9,70 +9,163 @@ from settings import SOL_Y, LARGEUR, BRUN, BRUN_CLAIR, VERT_CLAIR
 
 class ObuseCompost:
     """
-    Compost shell that follows a quadratic Bezier arc from mortar to click point.
-    Click = landing spot: fully predictable, easy to aim.
+    Compost shell with realistic ballistic physics.
+    Follows a parabolic trajectory with air resistance (drag).
     """
 
     RAYON_EXPLOSION = 65
-    DURATION = 0.72            # seconds to reach target
-    ARC_LIFT_BASE = 180        # px upward at arc midpoint
-    ARC_LIFT_DIST = 0.22       # extra lift per pixel of horizontal distance
+    RAYON_COLLISION = 25  # Collision radius for enemies
+
+    # Physics constants
+    GRAVITY = 500.0        # pixels/sec² (downward acceleration)
+    DRAG_COEFFICIENT = 0.98  # Air resistance per frame (0-1, lower = more drag)
+    INITIAL_SPEED = 650.0  # pixels/sec (launch speed)
 
     def __init__(self, x0: float, y0: float, xt: float, yt: float) -> None:
-        self.p_start = (float(x0), float(y0))
-        self.p_end   = (float(xt), float(yt))
+        self.x = float(x0)
+        self.y = float(y0)
+        self.sol_y = SOL_Y
 
+        # Calculate initial velocity vector (angle and magnitude)
         dx = xt - x0
-        arc_h = self.ARC_LIFT_BASE + abs(dx) * self.ARC_LIFT_DIST
-        mid_x = (x0 + xt) / 2
-        mid_y = (y0 + yt) / 2 - arc_h          # up = negative y in screen
-        self.p_ctrl = (mid_x, mid_y)
+        dy = yt - y0
 
-        self.progress = 0.0                      # 0 → 1 along the arc
+        # Estimate angle to reach target with realistic arc
+        # Using physics: we want a nice parabolic arc
+        distance = math.sqrt(dx*dx + dy*dy)
+        target_angle = self._calculate_launch_angle(distance, dy)
+
+        # Convert angle to velocity components
+        self.vx = math.cos(target_angle) * self.INITIAL_SPEED
+        self.vy = -math.sin(target_angle) * self.INITIAL_SPEED  # negative = upward
+
         self.actif = True
-        self.x, self.y = float(x0), float(y0)
+        self.explose = False
         self.trail: list[tuple[float, float]] = []
         self._glow_t = 0.0
+        self.time = 0.0  # Total time elapsed
+        self.time = 0.0  # Total time elapsed
+
+    def _calculate_launch_angle(self, distance: float, height_diff: float) -> float:
+        """Calculate launch angle for a good arc to target."""
+        # Adjust for height difference and distance
+        base_angle = 0.6  # ~35 degrees (good for most distances)
+
+        # Adjust angle based on target height
+        if height_diff < 0:  # Target is higher
+            base_angle += 0.2
+        elif height_diff > 100:  # Target is much lower
+            base_angle -= 0.15
+
+        return base_angle
 
     # ── Bezier helpers ────────────────────────────────────────────────────────
 
+    # ── Physics helpers ───────────────────────────────────────────────────────
+
+    def _calculate_end_velocity(self) -> None:
+        """Calculate velocity vector at the end of the Bezier curve."""
+        # No longer needed with ballistic physics
+        pass
+
     def _bezier(self, t: float) -> tuple[float, float]:
-        p0, p1, p2 = self.p_start, self.p_ctrl, self.p_end
-        mt = 1.0 - t
-        x = mt * mt * p0[0] + 2 * mt * t * p1[0] + t * t * p2[0]
-        y = mt * mt * p0[1] + 2 * mt * t * p1[1] + t * t * p2[1]
-        return x, y
+        """No longer used - replaced by ballistic physics."""
+        return self.x, self.y
 
     @classmethod
     def preview_points(cls, x0: float, y0: float, xt: float, yt: float,
                        steps: int = 22) -> list[tuple[float, float]]:
-        """Return points along the Bezier arc for trajectory preview."""
+        """Return points along the ballistic trajectory for preview."""
+        pts: list[tuple[float, float]] = []
+
+        # Create temporary projectile to simulate trajectory
         dx = xt - x0
-        arc_h = cls.ARC_LIFT_BASE + abs(dx) * cls.ARC_LIFT_DIST
-        mid_x = (x0 + xt) / 2
-        mid_y = (y0 + yt) / 2 - arc_h
-        pts = []
+        dy = yt - y0
+        distance = math.sqrt(dx*dx + dy*dy)
+        angle = 0.6  # Default angle
+        if dy < 0:
+            angle += 0.2
+        elif dy > 100:
+            angle -= 0.15
+
+        vx = math.cos(angle) * cls.INITIAL_SPEED
+        vy = -math.sin(angle) * cls.INITIAL_SPEED
+
+        x, y = float(x0), float(y0)
         for i in range(steps + 1):
-            t = i / steps
-            mt = 1.0 - t
-            px = mt * mt * x0 + 2 * mt * t * mid_x + t * t * xt
-            py = mt * mt * y0 + 2 * mt * t * mid_y + t * t * yt
-            pts.append((px, py))
+            t = i / steps * 1.2  # Simulate to 1.2 seconds
+
+            # Apply drag to velocity
+            speed = math.sqrt(vx*vx + vy*vy)
+            if speed > 0:
+                drag_factor = cls.DRAG_COEFFICIENT ** t
+                vx_dragged = vx * drag_factor
+                vy_dragged = vy * drag_factor
+            else:
+                vx_dragged = vx
+                vy_dragged = vy
+
+            # Update position (basic Euler integration)
+            x = x0 + vx * t * 0.8
+            y = y0 + vy * t * 0.8 + 0.5 * cls.GRAVITY * t * t
+
+            if y > SOL_Y:
+                break
+            pts.append((x, y))
+
         return pts
 
     # ── Update ────────────────────────────────────────────────────────────────
 
-    def mettre_a_jour(self, dt: float) -> None:
+    def mettre_a_jour(self, dt: float, ennemis: list = None) -> bool:
+        """Update projectile position. Return True if it should explode."""
+        if self.explose or not self.actif:
+            return False
+
         self._glow_t += dt
         self.trail.append((self.x, self.y))
         if len(self.trail) > 18:
             self.trail.pop(0)
 
-        self.progress = min(1.0, self.progress + dt / self.DURATION)
-        self.x, self.y = self._bezier(self.progress)
+        old_x, old_y = self.x, self.y
 
-        if self.progress >= 1.0:
+        # Apply drag to velocity (air resistance)
+        drag_factor = self.DRAG_COEFFICIENT ** dt
+        self.vx *= drag_factor
+        self.vy *= drag_factor
+
+        # Apply gravity
+        self.vy += self.GRAVITY * dt
+
+        # Update position (basic Euler integration)
+        self.x += self.vx * dt
+        self.y += self.vy * dt
+
+        self.time += dt
+
+        # Check collision with enemies
+        if ennemis:
+            for e in ennemis:
+                if e.est_mort():
+                    continue
+                dist = math.hypot(e.x - self.x, e.y - self.y)
+                if dist <= self.RAYON_COLLISION:
+                    self.explose = True
+                    self.actif = False
+                    return True
+
+        # Check if projectile reached ground
+        if self.y >= self.sol_y:
+            self.explose = True
             self.actif = False
+            return True
+
+        # Timeout: projectile has been in flight too long
+        if self.time > 10.0:
+            self.actif = False
+            return False
+
+        return False
 
     def est_actif(self) -> bool:
         return self.actif
