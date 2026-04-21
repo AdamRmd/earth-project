@@ -514,6 +514,8 @@ def draw_menu(surf: pygame.Surface, t: float) -> dict[str, pygame.Rect]:
 
 # ── Boutique ──────────────────────────────────────────────────────────────────
 
+# ── Boutique ──────────────────────────────────────────────────────────────────
+
 def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
                   epouvantails: list, sel_seed: str | None, sel_equip: str | None,
                   msg: str, debt_repayment_amount: int = 0) -> dict[str, pygame.Rect]:
@@ -528,7 +530,7 @@ def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
     # Vertical separator
     pygame.draw.line(surf, C_BORDER, (SHOP_SPLIT_X, 0), (SHOP_SPLIT_X, HAUTEUR), 2)
 
-    # ── Left panel ────────────────────────────────────────────────────────────
+    # ── LEFT PANEL ────────────────────────────────────────────────────────────
     _txt(surf, f"SAISON {joueur.saison}  —  VOTRE CHAMP", 20, C_GOLD,
          (SHOP_SPLIT_X // 2, 22), center=True, bold=True, shadow=True)
 
@@ -552,7 +554,6 @@ def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
         in_ep = i in ep_slots
         hover = r.collidepoint(pygame.mouse.get_pos())
 
-        # Background
         if ptype:
             d = PLANTES_DATA[ptype]
             bg = (28, 65, 28)
@@ -566,7 +567,6 @@ def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
 
         _rrect(surf, bg, r, radius=12, border=2, bcol=border_col)
 
-        # Slot number badge
         badge_r = pygame.Rect(r.x + 4, r.y + 4, 18, 18)
         _rrect(surf, C_PANEL, badge_r, radius=5)
         _txt(surf, str(i + 1), 11, C_GRAY, badge_r.center, center=True)
@@ -596,19 +596,55 @@ def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
 
     # Message
     if msg:
-        _txt(surf, msg, 14, (255, 210, 80), (SHOP_SPLIT_X // 2, y_s + 98),
+        _txt(surf, msg, 14, (255, 210, 80), (SHOP_SPLIT_X // 2, y_s + 88),
              center=True, bold=True)
 
     # Selection hint
     if sel_seed:
         d = PLANTES_DATA[sel_seed]
         hint = f"→ Placer : {d['nom']}   (clic droit = annuler)"
-        _txt(surf, hint, 13, C_LIME, (SHOP_SPLIT_X // 2, y_s + 118), center=True)
+        _txt(surf, hint, 13, C_LIME, (SHOP_SPLIT_X // 2, y_s + 108), center=True)
     elif sel_equip == "epouvantail":
         _txt(surf, "→ Placer : Épouvantail   (clic droit = annuler)", 13,
-             (215, 195, 90), (SHOP_SPLIT_X // 2, y_s + 118), center=True)
+             (215, 195, 90), (SHOP_SPLIT_X // 2, y_s + 108), center=True)
 
-    # Start button
+    # ── Debt repayment panel (left panel, below stats) ────────────────────────
+    y_debt = y_s + 124
+    debt_panel = pygame.Rect(10, y_debt, SHOP_SPLIT_X - 20, 72)
+    _rrect(surf, (35, 25, 25), debt_panel, radius=10, border=2, bcol=(70, 30, 30))
+    _txt(surf, "💳  REMBOURSER LA DETTE", 13, C_RED,
+         (debt_panel.centerx, debt_panel.y + 7), center=True, bold=True)
+
+    slider_w = debt_panel.width - 24
+    slider_rect = pygame.Rect(debt_panel.x + 12, debt_panel.y + 27, slider_w, 16)
+    rects["debt_slider"] = slider_rect
+    pygame.draw.rect(surf, (40, 20, 20), slider_rect, border_radius=4)
+    pygame.draw.rect(surf, (100, 40, 40), slider_rect, 2, border_radius=4)
+    if slider_w > 0 and joueur.argent > 0:
+        fill_w = int(slider_w * (debt_repayment_amount / joueur.argent))
+        pygame.draw.rect(surf, (200, 80, 80),
+                         pygame.Rect(slider_rect.x, slider_rect.y, fill_w, 16),
+                         border_radius=4)
+
+    _txt(surf, f"{debt_repayment_amount:,} €  /  {joueur.argent:,} €".replace(",", " "),
+         11, C_GOLD, (debt_panel.centerx, debt_panel.y + 49), center=True)
+
+    btn_w2 = (slider_w - 6) // 2
+    confirm_btn = pygame.Rect(debt_panel.x + 12, debt_panel.y + 49, btn_w2, 20)
+    rects["debt_confirm"] = confirm_btn
+    _rrect(surf,
+           (80, 150, 80) if confirm_btn.collidepoint(pygame.mouse.get_pos()) else (50, 110, 50),
+           confirm_btn, radius=5, border=1, bcol=(20, 60, 20))
+    _txt(surf, "✓ Confirmer", 11, C_WHITE, confirm_btn.center, center=True, bold=True)
+
+    reset_btn = pygame.Rect(debt_panel.x + 12 + btn_w2 + 6, debt_panel.y + 49, btn_w2, 20)
+    rects["debt_reset"] = reset_btn
+    _rrect(surf,
+           (150, 80, 80) if reset_btn.collidepoint(pygame.mouse.get_pos()) else (110, 50, 50),
+           reset_btn, radius=5, border=1, bcol=(60, 20, 20))
+    _txt(surf, "✕ Annuler", 11, C_WHITE, reset_btn.center, center=True, bold=True)
+
+    # ── Start button (left panel only) ───────────────────────────────────────
     btn_y = HAUTEUR - 72
     btn = pygame.Rect(12, btn_y, SHOP_SPLIT_X - 24, 58)
     rects["start"] = btn
@@ -623,11 +659,12 @@ def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
         _rrect(surf, (40, 40, 40), btn, radius=14, border=2, bcol=(60, 60, 60))
         _txt(surf, "Achetez des graines !", 18, C_GRAY, btn.center, center=True)
 
-    # ── Right panel: shop ─────────────────────────────────────────────────────
-    _txt(surf, "BOUTIQUE", 22, C_GOLD, (SHOP_SPLIT_X + (LARGEUR - SHOP_SPLIT_X) // 2, 22),
+    # ── RIGHT PANEL : shop items ──────────────────────────────────────────────
+    _txt(surf, "BOUTIQUE", 22, C_GOLD,
+         (SHOP_SPLIT_X + (LARGEUR - SHOP_SPLIT_X) // 2, 22),
          center=True, bold=True, shadow=True)
-    _txt(surf, "(clic droit = revendre)", 11, C_GRAY, (SHOP_SPLIT_X + (LARGEUR - SHOP_SPLIT_X) // 2, 46),
-         center=True)
+    _txt(surf, "(clic droit = revendre)", 11, C_GRAY,
+         (SHOP_SPLIT_X + (LARGEUR - SHOP_SPLIT_X) // 2, 46), center=True)
 
     cat_icons = {"munitions": "💣", "arme": "✈️", "sol": "🌱", "defense": "🪆"}
     cat_cols  = {"munitions": C_ORANGE, "arme": C_RED, "sol": C_LIME, "defense": C_GOLD}
@@ -660,16 +697,10 @@ def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
             bg, bord = C_CARD, C_BORDER
 
         _rrect(surf, bg, r, radius=10, border=2, bcol=bord)
-
-        # Icon
         _txt(surf, icon, 24, ic, (r.x + 12, r.centery - 12))
-
-        # Text
         name_col = C_WHITE if affordable else (100, 90, 90)
         _txt(surf, nom, 15, name_col, (r.x + 46, r.y + 9), bold=True)
         _txt(surf, desc, 12, C_GRAY if affordable else (70, 65, 65), (r.x + 46, r.y + 30))
-
-        # Price badge
         price_r = pygame.Rect(r.right - 88, r.y + 14, 80, 28)
         pbg = (35, 55, 20) if affordable else (50, 30, 30)
         _rrect(surf, pbg, price_r, radius=8, border=1,
@@ -677,70 +708,7 @@ def draw_boutique(surf: pygame.Surface, joueur, sol, slot_types: list,
         _txt(surf, f"{cout} €", 15, C_GOLD if affordable else C_RED,
              price_r.center, center=True, bold=True)
 
-    # ── Debt repayment panel ──────────────────────────────────────────────────
-    debt_panel_y = HAUTEUR - 200
-    debt_panel = pygame.Rect(SHOP_SPLIT_X + 12, debt_panel_y, LARGEUR - SHOP_SPLIT_X - 24, 110)
-    _rrect(surf, (35, 25, 25), debt_panel, radius=10, border=2, bcol=(70, 30, 30))
-
-    # Title
-    _txt(surf, "💳  REMBOURSER LA DETTE", 14, C_RED,
-         (debt_panel.centerx, debt_panel.y + 8), center=True, bold=True)
-
-    # Slider
-    slider_y = debt_panel.y + 32
-    slider_w = debt_panel.width - 24
-    slider_rect = pygame.Rect(debt_panel.x + 12, slider_y, slider_w, 20)
-    rects["debt_slider"] = slider_rect
-
-    # Slider background
-    pygame.draw.rect(surf, (40, 20, 20), slider_rect, border_radius=5)
-    pygame.draw.rect(surf, (100, 40, 40), slider_rect, 2, border_radius=5)
-
-    # Slider fill (progress)
-    if slider_w > 0 and joueur.argent > 0:
-        fill_w = int(slider_w * (debt_repayment_amount / joueur.argent))
-        fill_rect = pygame.Rect(slider_rect.x, slider_rect.y, fill_w, slider_rect.height)
-        pygame.draw.rect(surf, (200, 80, 80), fill_rect, border_radius=5)
-
-    # Current amount
-    _txt(surf, f"{debt_repayment_amount:,} € / {joueur.argent:,} €".replace(",", " "),
-         12, C_GOLD, (debt_panel.centerx, slider_y + 30), center=True)
-
-    # Confirm button
-    confirm_btn = pygame.Rect(debt_panel.x + 12, debt_panel.y + 72,
-                              slider_w // 2 - 6, 28)
-    rects["debt_confirm"] = confirm_btn
-    confirm_hover = confirm_btn.collidepoint(pygame.mouse.get_pos())
-    confirm_col = (80, 150, 80) if confirm_hover else (50, 110, 50)
-    _rrect(surf, confirm_col, confirm_btn, radius=6, border=2, bcol=(20, 60, 20))
-    _txt(surf, "✓ Confirmer", 12, C_WHITE, confirm_btn.center, center=True, bold=True)
-
-    # Reset button
-    reset_btn = pygame.Rect(debt_panel.x + 12 + slider_w // 2 + 6, debt_panel.y + 72,
-                            slider_w // 2 - 6, 28)
-    rects["debt_reset"] = reset_btn
-    reset_hover = reset_btn.collidepoint(pygame.mouse.get_pos())
-    reset_col = (150, 80, 80) if reset_hover else (110, 50, 50)
-    _rrect(surf, reset_col, reset_btn, radius=6, border=2, bcol=(60, 20, 20))
-    _txt(surf, "✕ Annuler", 12, C_WHITE, reset_btn.center, center=True, bold=True)
-
-    # Right start button
-    btn2_y = HAUTEUR - 72
-    btn2 = pygame.Rect(SHOP_SPLIT_X + 12, btn2_y, LARGEUR - SHOP_SPLIT_X - 24, 58)
-    rects["start2"] = btn2
-    hover2 = btn2.collidepoint(pygame.mouse.get_pos())
-    if can_start:
-        bc2 = (62, 200, 62) if hover2 else (42, 155, 42)
-        _rrect(surf, bc2, btn2, radius=14, border=3, bcol=(20, 100, 20))
-        _txt(surf, "LANCER LA SAISON  →", 24, C_WHITE, btn2.center,
-             center=True, bold=True, shadow=True)
-    else:
-        _rrect(surf, (40, 40, 40), btn2, radius=14, border=2, bcol=(60, 60, 60))
-        _txt(surf, "Choisissez vos graines !", 18, C_GRAY, btn2.center, center=True)
-
     return rects
-
-
 # ── Bilan ─────────────────────────────────────────────────────────────────────
 
 def draw_bilan(surf: pygame.Surface, saison: int, details: list, gain_total: int,

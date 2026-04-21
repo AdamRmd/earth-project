@@ -135,8 +135,7 @@ class Ferme:
             return None
 
         # ── Start button ──────────────────────────────────────────────────────
-        if (rects.get("start",  _empty).collidepoint(pos) or
-                rects.get("start2", _empty).collidepoint(pos)):
+        if rects.get("start",  _empty).collidepoint(pos):
             if self.can_start():
                 return "start"
             self.set_msg("Achetez d'abord des graines !")
