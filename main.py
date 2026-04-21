@@ -136,8 +136,9 @@ class Game:
         if self.joueur.munitions <= 0:
             self._float("Plus de munitions !", MORTIER_X + 60, MORTIER_Y - 40, C_RED)
             return
+        # Utilise la position Y réelle pour un contrôle d'angle fluide
         tx, ty = float(pos[0]), float(min(pos[1], SOL_Y - 4))
-        proj = ObuseCompost(float(MORTIER_X), float(MORTIER_Y), tx, ty)
+        proj = ObuseCompost(float(MORTIER_X), float(MORTIER_Y), tx, ty, force=self.joueur.force_tir)
         self.projectiles.append(proj)
         self.joueur.munitions -= 1
 
@@ -297,7 +298,7 @@ class Game:
         still_active: list[ObuseCompost] = []
         for proj in self.projectiles:
             if proj.est_actif():
-                proj.mettre_a_jour(dt)
+                proj.mettre_a_jour(dt, self.ennemis)
             if not proj.est_actif():
                 killed = proj.exploser(self.ennemis, self.sol)
                 ix, iy = proj.x, proj.y
@@ -377,14 +378,32 @@ class Game:
 
         mx, my = pygame.mouse.get_pos()
 
+        # Calcul de la puissance basé sur la position X de la souris
+        # Plus à droite = plus puissant
+        # MORTIER_X + 20 = minimum (10% de puissance)
+        # LARGEUR = maximum (100% de puissance)
+        if mx > MORTIER_X + 20:
+            # Force va de 0.1 à 1.0 basé sur la position X
+            range_x = LARGEUR - (MORTIER_X + 20)
+            force_ratio = (mx - (MORTIER_X + 20)) / range_x
+            self.joueur.force_tir = max(0.1, min(1.0, force_ratio))
+        else:
+            # Si la souris est trop à gauche, force minimale
+            self.joueur.force_tir = 0.1
+
+        # Calcul de la cible basé sur la position de la souris
+        # Position Y contrôle l'angle de tir
+        # On tire vers la position réelle du curseur pour avoir un contrôle fluide
+        target_x = float(mx)
+        target_y = float(min(my, SOL_Y - 4))
+
         # Trajectory preview (behind everything else)
         if self.joueur.munitions > 0 and mx > MORTIER_X + 20:
-            ty = min(my, SOL_Y - 4)
             draw_trajectory(screen, float(MORTIER_X), float(MORTIER_Y),
-                            float(mx), float(ty), has_ammo=True)
+                            target_x, target_y, has_ammo=True, force=self.joueur.force_tir)
         elif mx > MORTIER_X + 20:
             draw_trajectory(screen, float(MORTIER_X), float(MORTIER_Y),
-                            float(mx), float(min(my, SOL_Y - 4)), has_ammo=False)
+                            target_x, target_y, has_ammo=False, force=self.joueur.force_tir)
 
         # Mortar
         draw_mortier(screen, mx, my)

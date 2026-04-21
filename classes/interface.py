@@ -248,8 +248,8 @@ class Cloud:
 # ── Trajectory preview ────────────────────────────────────────────────────────
 
 def draw_trajectory(surf: pygame.Surface, x0: float, y0: float,
-                    xt: float, yt: float, has_ammo: bool) -> None:
-    pts = ObuseCompost.preview_points(x0, y0, xt, yt, steps=26)
+                    xt: float, yt: float, has_ammo: bool, force: float = 0.5) -> None:
+    pts = ObuseCompost.preview_points(x0, y0, xt, yt, steps=26, force=force)
     n = len(pts)
     for i, (px, py) in enumerate(pts):
         if i % 2 != 0:
@@ -394,8 +394,18 @@ def draw_hud(surf: pygame.Surface, joueur, sol, saison: int) -> None:
     acol = C_LIME if joueur.munitions > 0 else C_RED
     _txt(surf, f"× {joueur.munitions}", 26, acol, (x + 8, 22), bold=True, shadow=True)
 
-    # ─ Plane block ─
+    # ─ Fire power block ─
     x = 665
+    pygame.draw.rect(surf, C_PANEL, (x, 6, 130, 50), border_radius=8)
+    pygame.draw.rect(surf, C_BORDER, (x, 6, 130, 50), 1, border_radius=8)
+    _txt(surf, "PUISSANCE", 9, C_GRAY, (x + 8, 9))
+    force_pct = int(joueur.force_tir * 100)
+    fcol = (100 + int(155 * joueur.force_tir), 100 + int(155 * joueur.force_tir), 50)
+    _bar(surf, pygame.Rect(x + 8, 24, 114, 10), joueur.force_tir, 1.0, fcol)
+    _txt(surf, f"{force_pct}%", 11, C_GOLD, (x + 50, 36), bold=True)
+
+    # ─ Plane block ─
+    x = 810
     pygame.draw.rect(surf, C_PANEL, (x, 6, 130, 50), border_radius=8)
     plane_border = C_GOLD if joueur.passages_aeriens > 0 else (50, 45, 20)
     pygame.draw.rect(surf, plane_border, (x, 6, 130, 50), 1, border_radius=8)
@@ -404,7 +414,7 @@ def draw_hud(surf: pygame.Surface, joueur, sol, saison: int) -> None:
     _txt(surf, f"× {joueur.passages_aeriens}", 26, pcol, (x + 8, 22), bold=True, shadow=True)
 
     # ─ Controls ─
-    x = 820
+    x = 950
     _txt(surf, "CLIC GAUCHE  Tirer", 11, C_GRAY, (x, 10))
     _txt(surf, "A  Avion   ESC  Menu", 11, C_GRAY, (x, 26))
     _txt(surf, "CLIC DROIT  Avion aussi", 11, C_GRAY, (x, 42))

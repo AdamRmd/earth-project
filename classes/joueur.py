@@ -12,6 +12,7 @@ class Joueur:
         self.passages_aeriens = 0
         self.score = 0
         self.saison = 1
+        self.force_tir = 0.5  # 0.0 à 1.0 : contrôle la distance/puissance du mortier
 
     def peut_acheter(self, prix):
         return self.argent >= prix
