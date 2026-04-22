@@ -1,244 +1,209 @@
-# classes/plantes.py — Plant and Scarecrow classes
-
 import pygame
 import math
-from settings import (
-    PLANTES_DATA, SOL_Y, PLANT_X_START, PLANT_SPACING, NB_SLOTS,
-    BLANC, NOIR, ROUGE, VERT, VERT_CLAIR, JAUNE, ORANGE, BRUN,
-)
+from settings import PLANTES_DATA, SOL_Y, PLANT_X_START, PLANT_SPACING
 
 
 class Plante:
-    def __init__(self, type_plante, slot_index, sol):
+    """
+    Représente une plante dans le potager.
+    Gère sa croissance, sa santé, sa valeur à la revente et son affichage.
+    """
+    def __init__(self, type_plante: str, index_emplacement: int, sol):
+        """
+        Initialise une plante dans un emplacement donné.
+        
+        Entrées :
+            - type_plante (str) : L'identifiant du type de plante (ex: 'tomate', 'mais').
+            - index_emplacement (int) : L'index du slot (0 à 7) où la plante est semée.
+            - sol (Sol) : L'instance du sol, pour lier la croissance à la santé de la terre.
+        """
         self.type = type_plante
-        self.slot_index = slot_index
+        self.index_emplacement = index_emplacement
         self.sol = sol
-        data = PLANTES_DATA[type_plante]
-        self.nom = data["nom"]
-        self.cout = data["cout"]
-        self.valeur = data["valeur"]
-        self.temps_pousse = data["temps_pousse"]
-        self.hp_max = data["hp_max"]
+        
+        donnees = PLANTES_DATA[type_plante]
+        self.nom = donnees["nom"]
+        self.cout = donnees["cout"]
+        self.valeur = donnees["valeur"]
+        self.temps_pousse = donnees["temps_pousse"]
+        self.hp_max = donnees["hp_max"]
         self.hp = float(self.hp_max)
-        self.couleur = data["couleur"]
-        self.x = PLANT_X_START + slot_index * PLANT_SPACING
+        self.couleur = donnees["couleur"]
+        
+        self.x = PLANT_X_START + index_emplacement * PLANT_SPACING
         self.y = SOL_Y
-        self.growth = 0.0          # 0.0 → 1.0
-        self.growth_timer = 0.0
+        self.croissance = 0.0
+        self.chronometre_croissance = 0.0
         self.vivante = True
-        # Sway animation
-        self._sway_t = slot_index * 0.37  # phase offset per plant
+        self.chronometre_ondulation = index_emplacement * 0.37
 
-    # ── Logic ────────────────────────────────────────────────────────────────
-
-    def pousser(self, dt, sol_sante):
+    def pousser(self, dt: float, sante_sol: float) -> None:
+        """
+        Fait grandir la plante en fonction du temps et de la qualité du sol.
+        
+        Entrées :
+            - dt (float) : Temps écoulé depuis la dernière image.
+            - sante_sol (float) : Pourcentage de santé du sol (accélère ou ralentit la pousse).
+        """
         if not self.vivante:
             return
-        # Growth rate boosted by soil health
-        rate = 0.3 + 0.7 * sol_sante / 100.0
-        self.growth_timer += dt * rate
-        self.growth = min(1.0, self.growth_timer / self.temps_pousse)
-        self._sway_t += dt
+            
+        taux_croissance = 0.3 + 0.7 * sante_sol / 100.0
+        self.chronometre_croissance += dt * taux_croissance
+        self.croissance = min(1.0, self.chronometre_croissance / self.temps_pousse)
+        self.chronometre_ondulation += dt
 
-    def subir_degats(self, montant):
+    def subir_degats(self, montant: float) -> None:
+        """
+        Réduit la vie de la plante lorsqu'elle est attaquée.
+        
+        Entrée :
+            - montant (float) : La quantité de dégâts subis.
+        """
         self.hp -= montant
         if self.hp <= 0:
             self.hp = 0
             self.vivante = False
 
-    def est_morte(self):
+    def est_morte(self) -> bool:
+        """
+        Vérifie si la plante a été détruite.
+        
+        Sortie :
+            - bool : True si morte, False sinon.
+        """
         return not self.vivante or self.hp <= 0
 
-    def est_recoltable(self):
-        return self.growth >= 0.5 and self.vivante
+    def est_recoltable(self) -> bool:
+        """
+        Vérifie si la plante a suffisamment poussé pour être vendue.
+        
+        Sortie :
+            - bool : True si la croissance est >= 50% et la plante vivante.
+        """
+        return self.croissance >= 0.5 and self.vivante
 
-    def vendre(self):
-        """Return money earned based on growth percentage."""
+    def vendre(self) -> int:
+        """
+        Calcule la valeur de revente de la plante basée sur sa croissance.
+        
+        Sortie :
+            - int : Le montant d'argent gagné (0 si non récoltable).
+        """
         if not self.est_recoltable():
             return 0
-        # Proportional to growth: 50% growth = 50% of value
-        return int(self.valeur * self.growth)
+        return int(self.valeur * self.croissance)
 
-    # ── Draw ─────────────────────────────────────────────────────────────────
-
-    def draw(self, surface):
-        g = self.growth
-        if g <= 0:
+    def draw(self, surface: pygame.Surface) -> None:
+        """
+        Dessine la plante à l'écran, avec des variations selon l'espèce, sa croissance et sa santé.
+        
+        Entrée :
+            - surface (pygame.Surface) : Surface de rendu.
+        """
+        c = self.croissance
+        if c <= 0:
             return
 
-        # Wilt effect: lean when low HP
-        hp_ratio = self.hp / self.hp_max
-        sway = math.sin(self._sway_t * 1.5) * 3 * g
-        if hp_ratio < 0.3:
-            sway += 8 * (1 - hp_ratio / 0.3)  # lean right when dying
+        ratio_hp = self.hp / self.hp_max
+        ondulation = math.sin(self.chronometre_ondulation * 1.5) * 3 * c
+        if ratio_hp < 0.3:
+            ondulation += 8 * (1 - ratio_hp / 0.3)
 
         base_x = self.x
         base_y = self.y
 
         if self.type == "tomate":
-            self._draw_tomate(surface, base_x, base_y, g, sway, hp_ratio)
+            self._dessiner_tomate(surface, base_x, base_y, c, ondulation, ratio_hp)
         elif self.type == "mais":
-            self._draw_mais(surface, base_x, base_y, g, sway, hp_ratio)
+            self._dessiner_mais(surface, base_x, base_y, c, ondulation, ratio_hp)
         elif self.type == "citrouille":
-            self._draw_citrouille(surface, base_x, base_y, g, sway, hp_ratio)
+            self._dessiner_citrouille(surface, base_x, base_y, c, ondulation, ratio_hp)
 
-        # HP bar (only if not full HP and alive)
-        if hp_ratio < 0.99 and self.vivante:
-            bar_w = 40
-            bar_h = 5
-            bx = base_x - bar_w // 2
-            by = base_y - int(80 * g) - 15
-            pygame.draw.rect(surface, (80, 0, 0), (bx, by, bar_w, bar_h))
-            fill_w = int(bar_w * hp_ratio)
-            bar_color = (int(220 * (1 - hp_ratio)), int(180 * hp_ratio), 0)
-            pygame.draw.rect(surface, bar_color, (bx, by, fill_w, bar_h))
+        if ratio_hp < 0.99 and self.vivante:
+            largeur_barre = 40
+            hauteur_barre = 5
+            pos_x = base_x - largeur_barre // 2
+            pos_y = base_y - int(80 * c) - 15
+            pygame.draw.rect(surface, (80, 0, 0), (pos_x, pos_y, largeur_barre, hauteur_barre))
+            largeur_remplie = int(largeur_barre * ratio_hp)
+            couleur_barre = (int(220 * (1 - ratio_hp)), int(180 * ratio_hp), 0)
+            pygame.draw.rect(surface, couleur_barre, (pos_x, pos_y, largeur_remplie, hauteur_barre))
 
-    def _draw_tomate(self, surface, bx, by, g, sway, hp_ratio):
-        stem_h = int(70 * g)
-        # Wilt color
-        if hp_ratio < 0.4:
-            stem_c = (80, 100, 30)
-        else:
-            stem_c = (40, 140, 40)
-        # Stem
-        pygame.draw.line(surface, stem_c,
-                         (bx, by),
-                         (int(bx + sway), by - stem_h), 3)
-        # Leaves
-        if g > 0.3:
-            leaf_y = by - stem_h // 2
-            leaf_x = int(bx + sway * 0.5)
-            pygame.draw.ellipse(surface, stem_c,
-                                (leaf_x - 12, leaf_y - 6, 20, 10))
-            pygame.draw.ellipse(surface, stem_c,
-                                (leaf_x - 8, leaf_y - 6, 20, 10))
-        # Tomatoes
-        if g > 0.5:
-            nb = max(1, int(g * 3))
-            offsets = [(-8, 0), (8, 0), (0, -10)]
-            tom_color = (
-                min(255, int(200 * hp_ratio + 55)),
-                min(255, int(60  * hp_ratio)),
-                min(255, int(30  * hp_ratio)),
+    def _dessiner_tomate(self, surface: pygame.Surface, base_x: float, base_y: float, croissance: float, ondulation: float, ratio_hp: float) -> None:
+        """Dessine spécifiquement un plant de tomates."""
+        hauteur_tige = int(70 * croissance)
+        couleur_tige = (80, 100, 30) if ratio_hp < 0.4 else (40, 140, 40)
+        
+        pygame.draw.line(surface, couleur_tige, (base_x, base_y), (int(base_x + ondulation), base_y - hauteur_tige), 3)
+        
+        if croissance > 0.3:
+            feuille_y = base_y - hauteur_tige // 2
+            feuille_x = int(base_x + ondulation * 0.5)
+            pygame.draw.ellipse(surface, couleur_tige, (feuille_x - 12, feuille_y - 6, 20, 10))
+            pygame.draw.ellipse(surface, couleur_tige, (feuille_x - 8, feuille_y - 6, 20, 10))
+            
+        if croissance > 0.5:
+            nombre = max(1, int(croissance * 3))
+            decalages = [(-8, 0), (8, 0), (0, -10)]
+            couleur_tomate = (
+                min(255, int(200 * ratio_hp + 55)),
+                min(255, int(60  * ratio_hp)),
+                min(255, int(30  * ratio_hp)),
             )
-            for k in range(min(nb, 3)):
-                ox, oy = offsets[k]
-                tx = int(bx + sway + ox)
-                ty = by - stem_h + oy
-                r = max(4, int(8 * g))
-                pygame.draw.circle(surface, tom_color, (tx, ty), r)
-                pygame.draw.circle(surface, (255, 200, 180), (tx - r // 3, ty - r // 3), r // 3)
+            for k in range(min(nombre, 3)):
+                ox, oy = decalages[k]
+                tx = int(base_x + ondulation + ox)
+                ty = base_y - hauteur_tige + oy
+                rayon = max(4, int(8 * croissance))
+                pygame.draw.circle(surface, couleur_tomate, (tx, ty), rayon)
+                pygame.draw.circle(surface, (255, 200, 180), (tx - rayon // 3, ty - rayon // 3), rayon // 3)
 
-    def _draw_mais(self, surface, bx, by, g, sway, hp_ratio):
-        stem_h = int(100 * g)
-        stem_c = (50, 160, 50) if hp_ratio > 0.4 else (100, 120, 30)
-        # Thick stalk
-        pygame.draw.line(surface, stem_c,
-                         (bx, by),
-                         (int(bx + sway), by - stem_h), 4)
-        # Leaves along stalk
-        if g > 0.25:
-            for frac in [0.4, 0.65, 0.85]:
-                lx = int(bx + sway * frac)
-                ly = by - int(stem_h * frac)
-                side = 1 if int(frac * 10) % 2 == 0 else -1
-                pts = [
-                    (lx, ly),
-                    (lx + side * 18, ly - 10),
-                    (lx + side * 22, ly),
-                ]
-                pygame.draw.polygon(surface, stem_c, pts)
-        # Corn cob
-        if g > 0.55:
-            cob_y = by - stem_h + 5
-            cob_x = int(bx + sway)
-            cob_h = max(6, int(20 * g))
-            cob_w = max(4, int(10 * g))
-            cob_color = (240, 200, 30) if hp_ratio > 0.4 else (180, 150, 20)
-            pygame.draw.ellipse(surface, cob_color,
-                                (cob_x - cob_w // 2, cob_y - cob_h // 2,
-                                 cob_w, cob_h))
-            # Kernel lines
-            if g > 0.75:
+    def _dessiner_mais(self, surface: pygame.Surface, base_x: float, base_y: float, croissance: float, ondulation: float, ratio_hp: float) -> None:
+        """Dessine spécifiquement un pied de maïs."""
+        hauteur_tige = int(100 * croissance)
+        couleur_tige = (50, 160, 50) if ratio_hp > 0.4 else (100, 120, 30)
+        
+        pygame.draw.line(surface, couleur_tige, (base_x, base_y), (int(base_x + ondulation), base_y - hauteur_tige), 4)
+        
+        if croissance > 0.25:
+            for fraction in [0.4, 0.65, 0.85]:
+                lx = int(base_x + ondulation * fraction)
+                ly = base_y - int(hauteur_tige * fraction)
+                cote = 1 if int(fraction * 10) % 2 == 0 else -1
+                points = [(lx, ly), (lx + cote * 18, ly - 10), (lx + cote * 22, ly)]
+                pygame.draw.polygon(surface, couleur_tige, points)
+                
+        if croissance > 0.55:
+            epis_y = base_y - hauteur_tige + 5
+            epis_x = int(base_x + ondulation)
+            epis_h = max(6, int(20 * croissance))
+            epis_w = max(4, int(10 * croissance))
+            couleur_epis = (240, 200, 30) if ratio_hp > 0.4 else (180, 150, 20)
+            pygame.draw.ellipse(surface, couleur_epis, (epis_x - epis_w // 2, epis_y - epis_h // 2, epis_w, epis_h))
+            
+            if croissance > 0.75:
                 for ky in range(3):
                     pygame.draw.line(surface, (200, 160, 0),
-                                     (cob_x - cob_w // 2, cob_y - cob_h // 4 + ky * 5),
-                                     (cob_x + cob_w // 2, cob_y - cob_h // 4 + ky * 5), 1)
+                                     (epis_x - epis_w // 2, epis_y - epis_h // 4 + ky * 5),
+                                     (epis_x + epis_w // 2, epis_y - epis_h // 4 + ky * 5), 1)
 
-    def _draw_citrouille(self, surface, bx, by, g, sway, hp_ratio):
-        stem_h = int(30 * g)
-        stem_c = (50, 140, 50) if hp_ratio > 0.4 else (80, 100, 30)
-        pygame.draw.line(surface, stem_c,
-                         (bx, by),
-                         (int(bx + sway), by - stem_h), 3)
-        if g > 0.2:
-            pumpkin_r = max(5, int(30 * g))
-            px = int(bx + sway)
-            py = by - stem_h
-            base_orange = (230, 110, 20) if hp_ratio > 0.4 else (170, 90, 20)
-            # Multiple lobes for pumpkin shape
-            for lobe_off, lobe_scale in [(-10, 0.7), (0, 1.0), (10, 0.7)]:
-                lobe_r = int(pumpkin_r * lobe_scale)
-                lobe_color = (
-                    min(255, base_orange[0] + lobe_off * 2),
-                    base_orange[1],
-                    base_orange[2],
-                )
-                pygame.draw.circle(surface, lobe_color,
-                                   (px + lobe_off, py), lobe_r)
-            # Highlight
-            pygame.draw.circle(surface, (255, 180, 80),
-                               (px - pumpkin_r // 3, py - pumpkin_r // 3),
-                               max(2, pumpkin_r // 4))
-            # Stem nub
-            pygame.draw.line(surface, (60, 100, 30), (px, py - pumpkin_r), (px, py - pumpkin_r - 8), 3)
-
-
-class Epouvantail:
-    RAYON_EFFET = 100
-
-    def __init__(self, slot_index):
-        self.slot_index = slot_index
-        self.x = PLANT_X_START + slot_index * PLANT_SPACING
-        self.y = SOL_Y
-
-    def get_rect(self):
-        """Bounding rect for the slow zone."""
-        return pygame.Rect(
-            self.x - self.RAYON_EFFET,
-            self.y - self.RAYON_EFFET * 2,
-            self.RAYON_EFFET * 2,
-            self.RAYON_EFFET * 2,
-        )
-
-    def dans_zone(self, ex, ey):
-        dx = ex - self.x
-        dy = ey - self.y
-        return (dx * dx + dy * dy) <= self.RAYON_EFFET ** 2
-
-    def draw(self, surface):
-        bx, by = self.x, self.y
-        # Post (vertical stick)
-        pygame.draw.line(surface, (120, 80, 40), (bx, by), (bx, by - 90), 5)
-        # Cross bar
-        pygame.draw.line(surface, (120, 80, 40), (bx - 25, by - 65), (bx + 25, by - 65), 4)
-        # Head (circle)
-        pygame.draw.circle(surface, (230, 190, 140), (bx, by - 85), 12)
-        # Hat
-        pygame.draw.polygon(surface, (50, 30, 10), [
-            (bx - 14, by - 85),
-            (bx + 14, by - 85),
-            (bx + 8, by - 103),
-            (bx - 8, by - 103),
-        ])
-        pygame.draw.rect(surface, (60, 35, 12), (bx - 16, by - 87, 32, 4))
-        # Clothes patch
-        pygame.draw.rect(surface, (80, 100, 160), (bx - 10, by - 73, 20, 20))
-        # Arms (sleeves)
-        pygame.draw.line(surface, (80, 100, 160), (bx - 25, by - 65), (bx - 25, by - 55), 4)
-        pygame.draw.line(surface, (80, 100, 160), (bx + 25, by - 65), (bx + 25, by - 55), 4)
-        # Subtle effect circle
-        effect_surf = pygame.Surface((self.RAYON_EFFET * 2, self.RAYON_EFFET * 2), pygame.SRCALPHA)
-        pygame.draw.circle(effect_surf, (200, 200, 100, 25),
-                           (self.RAYON_EFFET, self.RAYON_EFFET), self.RAYON_EFFET)
-        surface.blit(effect_surf, (bx - self.RAYON_EFFET, by - self.RAYON_EFFET))
+    def _dessiner_citrouille(self, surface: pygame.Surface, base_x: float, base_y: float, croissance: float, ondulation: float, ratio_hp: float) -> None:
+        """Dessine spécifiquement un plant de citrouille."""
+        hauteur_tige = int(30 * croissance)
+        couleur_tige = (50, 140, 50) if ratio_hp > 0.4 else (80, 100, 30)
+        pygame.draw.line(surface, couleur_tige, (base_x, base_y), (int(base_x + ondulation), base_y - hauteur_tige), 3)
+        
+        if croissance > 0.2:
+            rayon = max(5, int(30 * croissance))
+            px = int(base_x + ondulation)
+            py = base_y - hauteur_tige
+            orange_base = (230, 110, 20) if ratio_hp > 0.4 else (170, 90, 20)
+            
+            for dec_lobe, echelle_lobe in [(-10, 0.7), (0, 1.0), (10, 0.7)]:
+                rayon_lobe = int(rayon * echelle_lobe)
+                couleur_lobe = (min(255, orange_base[0] + dec_lobe * 2), orange_base[1], orange_base[2])
+                pygame.draw.circle(surface, couleur_lobe, (px + dec_lobe, py), rayon_lobe)
+                
+            pygame.draw.circle(surface, (255, 180, 80), (px - rayon // 3, py - rayon // 3), max(2, rayon // 4))
+            pygame.draw.line(surface, (60, 100, 30), (px, py - rayon), (px, py - rayon - 8), 3)

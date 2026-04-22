@@ -1,39 +1,30 @@
-# settings.py — All game constants for Green Rush : La Guerre du Potager
-
 import pygame
 
-# ── Screen ──────────────────────────────────────────────────────────────────
 LARGEUR = 1280
 HAUTEUR = 720
 FPS = 60
 TITRE = "Green Rush : La Guerre du Potager"
 
-# ── Layout ───────────────────────────────────────────────────────────────────
-SOL_Y = 480          # y-coordinate of the ground surface
-HUD_HAUTEUR = 60     # height of the top HUD bar
-SOL_EPAISSEUR = 240  # how deep the soil goes (SOL_Y to SOL_Y+SOL_EPAISSEUR)
+SOL_Y = 480          
+HUD_HAUTEUR = 60     
+SOL_EPAISSEUR = 240  
 
-# Mortar position (far left)
 MORTIER_X = 80
 MORTIER_Y = SOL_Y
 
-# Plant field
 PLANT_X_START = 200
 PLANT_SPACING = 120
 NB_SLOTS = 8
 
-# ── Physics ──────────────────────────────────────────────────────────────────
-GRAVITE = 400            # pixels per second squared (screen coords, y down)
-VITESSE_PROJECTILE = 750 # pixels per second
+GRAVITE = 980            
+VITESSE_PROJECTILE = 1200 
 
-# ── Economy ──────────────────────────────────────────────────────────────────
 ARGENT_DEPART = 1500
 DETTE_CIBLE = 10000
 SOL_DEPART = 75
 MUNITIONS_DEPART = 5
 NB_SAISONS = 10
 
-# ── Colors ───────────────────────────────────────────────────────────────────
 BLANC       = (255, 255, 255)
 NOIR        = (0,   0,   0  )
 ROUGE       = (220, 50,  50 )
@@ -55,21 +46,18 @@ ROSE        = (255, 130, 150)
 VERT_TOXIQUE = (120, 220, 50)
 TRANSPARENT = (0,   0,   0,  0)
 
-# Sky gradient colors
 CIEL_HAUT   = (95,  160, 220)
 CIEL_BAS    = (195, 225, 250)
 
-# HUD
 HUD_BG      = (20,  30,  20 )
 HUD_TEXTE   = (240, 240, 200)
 
-# ── Plants data ──────────────────────────────────────────────────────────────
 PLANTES_DATA = {
     "tomate": {
         "nom": "Tomate",
         "cout": 120,
         "valeur": 380,
-        "temps_pousse": 30.0,   # seconds in action phase
+        "temps_pousse": 30.0,
         "hp_max": 80,
         "couleur": (220, 60, 60),
         "icone": "🍅",
@@ -97,13 +85,12 @@ PLANTES_DATA = {
     },
 }
 
-# ── Enemy data ────────────────────────────────────────────────────────────────
 ENNEMIS_DATA = {
     "limace": {
         "nom": "Limace",
         "hp": 40,
-        "vitesse": 45,          # pixels/s
-        "degats": 15,           # hp/s when eating
+        "vitesse": 45,          
+        "degats": 15,           
         "valeur": 0,
         "type_mouvement": "sol",
         "couleur": (160, 60, 180),
@@ -131,7 +118,6 @@ ENNEMIS_DATA = {
     },
 }
 
-# ── Shop items ────────────────────────────────────────────────────────────────
 BOUTIQUE_ITEMS = {
     "compost_5": {
         "nom": "Compost ×5",
@@ -147,72 +133,56 @@ BOUTIQUE_ITEMS = {
         "categorie": "munitions",
         "quantite": 10,
     },
-    "passage_aerien": {
-        "nom": "Passage Aérien",
-        "cout": 300,
-        "description": "L'avion épandeur (détruit sol −28%)",
-        "categorie": "arme",
-        "quantite": 1,
-    },
-    "vers_de_terre": {
-        "nom": "Vers de Terre",
-        "cout": 500,
-        "description": "+20% santé du sol",
-        "categorie": "sol",
-        "montant_sol": 20,
-    },
-    "biomasse": {
-        "nom": "Bio-masse",
-        "cout": 800,
-        "description": "+40% santé du sol",
-        "categorie": "sol",
-        "montant_sol": 40,
-    },
-    "epouvantail": {
-        "nom": "Épouvantail",
-        "cout": 380,
-        "description": "Ralentit les ennemis (rayon 100px)",
-        "categorie": "defense",
-    },
 }
 
-# ── Wave configuration ────────────────────────────────────────────────────────
-def get_vague_config(saison, vague):
-    """Return a list of (type_ennemi, count) for the given season/wave."""
-    # saison: 1-10, vague: 1-N
-
+def obtenir_configuration_vague(saison: int, numero_vague: int) -> list[tuple[str, int]]:
+    """
+    Retourne la configuration des ennemis pour une vague donnée selon la saison.
+    
+    Entrées :
+        - saison (int) : Le numéro de la saison actuelle (1 à 10).
+        - numero_vague (int) : Le numéro de la vague dans la saison.
+        
+    Sortie :
+        - list[tuple[str, int]] : Une liste contenant des tuples avec le type d'ennemi et sa quantité.
+    """
     if saison <= 2:
-        # Easy: 2 waves, mostly slugs
-        configs = [
+        configurations = [
             [("limace", 4)],
             [("limace", 6), ("corbeau", 1)],
         ]
-        return configs[min(vague - 1, len(configs) - 1)]
+        return configurations[min(numero_vague - 1, len(configurations) - 1)]
 
     elif saison <= 5:
-        # Medium: 3 waves, add crows
-        factor = 1 + (saison - 3) * 0.3
-        base = [
-            [("limace", int(5 * factor)), ("corbeau", vague)],
-            [("limace", int(4 * factor)), ("corbeau", 2 + vague)],
-            [("limace", 3), ("corbeau", 3), ("puceron", int(3 * factor))],
+        facteur_difficulte = 1 + (saison - 3) * 0.3
+        configurations = [
+            [("limace", int(5 * facteur_difficulte)), ("corbeau", numero_vague)],
+            [("limace", int(4 * facteur_difficulte)), ("corbeau", 2 + numero_vague)],
+            [("limace", 3), ("corbeau", 3), ("puceron", int(3 * facteur_difficulte))],
         ]
-        return base[min(vague - 1, len(base) - 1)]
+        return configurations[min(numero_vague - 1, len(configurations) - 1)]
 
     else:
-        # Hard: 4 waves, all types, lots of flying
-        factor = 1 + (saison - 6) * 0.4
-        base = [
-            [("limace", int(6 * factor)), ("corbeau", int(3 * factor))],
-            [("puceron", int(8 * factor)), ("corbeau", int(4 * factor))],
-            [("limace", int(4 * factor)), ("puceron", int(6 * factor)), ("corbeau", 3)],
-            [("limace", 5), ("puceron", int(10 * factor)), ("corbeau", int(5 * factor))],
+        facteur_difficulte = 1 + (saison - 6) * 0.4
+        configurations = [
+            [("limace", int(6 * facteur_difficulte)), ("corbeau", int(3 * facteur_difficulte))],
+            [("puceron", int(8 * facteur_difficulte)), ("corbeau", int(4 * facteur_difficulte))],
+            [("limace", int(4 * facteur_difficulte)), ("puceron", int(6 * facteur_difficulte)), ("corbeau", 3)],
+            [("limace", 5), ("puceron", int(10 * facteur_difficulte)), ("corbeau", int(5 * facteur_difficulte))],
         ]
-        idx = min(vague - 1, len(base) - 1)
-        return base[idx]
+        return configurations[min(numero_vague - 1, len(configurations) - 1)]
 
 
-def get_nb_vagues(saison):
+def obtenir_nombre_total_vagues(saison: int) -> int:
+    """
+    Détermine le nombre total de vagues pour une saison donnée.
+    
+    Entrées :
+        - saison (int) : Le numéro de la saison actuelle.
+        
+    Sortie :
+        - int : Le nombre de vagues prévues pour cette saison.
+    """
     if saison <= 2:
         return 2
     elif saison <= 5:

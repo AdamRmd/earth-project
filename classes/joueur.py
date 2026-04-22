@@ -1,74 +1,88 @@
-    # classes/joueur.py — Player data class
-
 from settings import ARGENT_DEPART, DETTE_CIBLE, MUNITIONS_DEPART
 
 
 class Joueur:
+    """
+    Représente les statistiques et ressources du joueur.
+    Gère l'argent, la dette, les munitions et le score.
+    """
     def __init__(self):
+        """Initialise un joueur avec les valeurs de départ définies dans settings.py."""
         self.argent = ARGENT_DEPART
         self.dette = DETTE_CIBLE
-        self.dette_remboursee = 0  # Money paid towards debt
+        self.dette_remboursee = 0
         self.munitions = MUNITIONS_DEPART
-        self.passages_aeriens = 0
         self.score = 0
         self.saison = 1
-        self.force_tir = 0.5  # 0.0 à 1.0 : contrôle la distance/puissance du mortier
 
-    def peut_acheter(self, prix):
+    def peut_acheter(self, prix: int) -> bool:
+        """
+        Vérifie si le joueur possède assez d'argent.
+        
+        Entrée :
+            - prix (int) : Le montant à vérifier.
+            
+        Sortie :
+            - bool : True si le joueur a les fonds nécessaires, False sinon.
+        """
         return self.argent >= prix
 
-    def acheter(self, prix):
+    def acheter(self, prix: int) -> bool:
+        """
+        Déduit un montant de l'argent du joueur si possible.
+        
+        Entrée :
+            - prix (int) : Le montant à déduire.
+            
+        Sortie :
+            - bool : True si l'achat a été effectué, False si fonds insuffisants.
+        """
         if self.peut_acheter(prix):
             self.argent -= prix
             return True
         return False
 
-    def gagner_argent(self, montant):
+    def gagner_argent(self, montant: int) -> None:
+        """
+        Ajoute de l'argent au joueur et augmente son score global.
+        
+        Entrée :
+            - montant (int) : L'argent gagné (ex: suite à une récolte).
+        """
         self.argent += montant
         self.score += montant
 
-    def rembourser_dette(self, montant):
-        """Pay towards debt. Money is permanently spent."""
+    def rembourser_dette(self, montant: int) -> bool:
+        """
+        Transfère l'argent du portefeuille du joueur vers le remboursement de la dette.
+        L'argent est définitivement dépensé.
+        
+        Entrée :
+            - montant (int) : Le montant à rembourser.
+            
+        Sortie :
+            - bool : True si le remboursement a réussi, False si fonds insuffisants.
+        """
         if self.argent >= montant and montant > 0:
             self.argent -= montant
             self.dette_remboursee += montant
             return True
         return False
 
-    def get_dette_restante(self):
-        """Return remaining debt to pay."""
+    def obtenir_dette_restante(self) -> int:
+        """
+        Calcule la quantité d'argent qu'il reste à payer pour éponger la dette.
+        
+        Sortie :
+            - int : Le montant restant de la dette (0 si totalement payée).
+        """
         return max(0, self.dette - self.dette_remboursee)
 
-    def is_dette_payee(self):
-        """Check if debt is fully paid."""
+    def dette_est_payee(self) -> bool:
+        """
+        Vérifie si le joueur a remboursé l'intégralité de sa dette.
+        
+        Sortie :
+            - bool : True si la dette est payée, False sinon.
+        """
         return self.dette_remboursee >= self.dette
-
-    def get_statut(self):
-        if self.argent >= self.dette:
-            return "VICTOIRE"
-        elif self.argent <= 0 and self.saison > 10:
-            return "FAILLITE"
-        return "EN_COURS"
-
-    def to_dict(self):
-        return {
-            "argent": self.argent,
-            "dette": self.dette,
-            "dette_remboursee": self.dette_remboursee,
-            "munitions": self.munitions,
-            "passages_aeriens": self.passages_aeriens,
-            "score": self.score,
-            "saison": self.saison,
-        }
-
-    @classmethod
-    def from_dict(cls, d):
-        j = cls()
-        j.argent = d.get("argent", ARGENT_DEPART)
-        j.dette = d.get("dette", DETTE_CIBLE)
-        j.dette_remboursee = d.get("dette_remboursee", 0)
-        j.munitions = d.get("munitions", MUNITIONS_DEPART)
-        j.passages_aeriens = d.get("passages_aeriens", 0)
-        j.score = d.get("score", 0)
-        j.saison = d.get("saison", 1)
-        return j

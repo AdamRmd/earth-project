@@ -1,276 +1,229 @@
-#classes/ferme.py — Shop and field management for Green Rush
-
-from __future__ import annotations
 import pygame
 from settings import NB_SLOTS, PLANTES_DATA, BOUTIQUE_ITEMS
-from classes.plantes import Plante, Epouvantail
+from classes.plantes import Plante
 from classes.interface import SHOP_ITEMS_ORDER
 
 
 class Ferme:
-    def __init__(self, config):
-        pass
     """
-    Owns all boutique state and field logic:
-    - slot_types, slots, epouvantails
-    - buy / sell / place logic
-    - debt repayment slider
-    - shop message
-    Exposes on_click() so main.py has zero shop logic.
+    Gère la logique de la boutique, de la ferme et des placements de plantes.
+    Cette classe gère également l'achat et la revente, ainsi que la configuration
+    avant de lancer la phase d'action.
     """
-
     def __init__(self, joueur, sol) -> None:
+        """
+        Initialise la ferme en la liant au joueur et au terrain.
+        
+        Entrées :
+            - joueur (Joueur) : L'instance du joueur pour gérer l'argent.
+            - sol (Sol) : L'instance du sol pour y lier les plantes.
+        """
         self.joueur = joueur
-        self.sol    = sol
+        self.sol = sol
 
-        # Field state
-        self.slot_types:   list[str | None]    = [None] * NB_SLOTS
-        self.slots:        list[Plante | None]  = [None] * NB_SLOTS
-        self.epouvantails: list[Epouvantail]    = []
+        self.types_emplacements = [None] * NB_SLOTS
+        self.plantes_actives = [None] * NB_SLOTS
 
-        # Selection state
-        self.sel_seed:  str | None = None
-        self.sel_equip: str | None = None
+        self.graine_selectionnee = None
+        
+        self.message = ""
+        self.chronometre_message = 0.0
 
-        # Message
-        self.msg   = ""
-        self.msg_t = 0.0
+        self.objets_achetes = {}
+        self.montant_remboursement_dette = 0
 
-        # Purchase tracking (reset each season)
-        self.seeds_bought: dict[str, int] = {}
-        self.items_bought: dict[str, int] = {}
-
-        # Debt repayment slider
-        self.debt_repayment_amount = 0
-
-    # ── Update ────────────────────────────────────────────────────────────────
-
-    def update(self, dt: float) -> None:
-        if self.msg_t > 0:
-            self.msg_t -= dt
-            if self.msg_t <= 0:
-                self.msg = ""
-
-    # ── Field helpers ─────────────────────────────────────────────────────────
+    def mettre_a_jour(self, dt: float) -> None:
+        """
+        Met à jour l'affichage temporaire des messages d'information de la boutique.
+        
+        Entrée :
+            - dt (float) : Delta time écoulé.
+        """
+        if self.chronometre_message > 0:
+            self.chronometre_message -= dt
+            if self.chronometre_message <= 0:
+                self.message = ""
 
     def preparer_plantes(self) -> None:
-        """Create Plante objects from slot_types. Call when starting action phase."""
+        """
+        Instancie les objets Plante en fonction des graines sélectionnées dans les emplacements.
+        Cette fonction est appelée juste avant le début de la phase d'action.
+        """
         for i in range(NB_SLOTS):
-            self.slots[i] = Plante(self.slot_types[i], i, self.sol) \
-                            if self.slot_types[i] else None
+            if self.types_emplacements[i]:
+                self.plantes_actives[i] = Plante(self.types_emplacements[i], i, self.sol)
+            else:
+                self.plantes_actives[i] = None
 
     def vider_terrain(self) -> None:
-        """Clear all slots and scarecrows. Call between seasons."""
-        self.slot_types   = [None] * NB_SLOTS
-        self.slots        = [None] * NB_SLOTS
-        self.epouvantails.clear()
+        """Réinitialise totalement le terrain entre chaque saison."""
+        self.types_emplacements = [None] * NB_SLOTS
+        self.plantes_actives = [None] * NB_SLOTS
 
-    def reset_saison(self) -> None:
-        """Reset purchase tracking and UI selection for a new season."""
-        self.sel_seed  = None
-        self.sel_equip = None
-        self.msg       = ""
-        self.seeds_bought          = {}
-        self.items_bought          = {}
-        self.debt_repayment_amount = 0
+    def reinitialiser_saison(self) -> None:
+        """Réinitialise les sélections et les compteurs d'achats pour une nouvelle saison."""
+        self.graine_selectionnee = None
+        self.message = ""
+        self.objets_achetes = {}
+        self.montant_remboursement_dette = 0
 
-    def can_start(self) -> bool:
-        return any(s is not None for s in self.slot_types)
-
-    # ── Message ───────────────────────────────────────────────────────────────
-
-    def set_msg(self, text: str, dur: float = 2.8) -> None:
-        self.msg   = text
-        self.msg_t = dur
-
-    # ── Click handler ─────────────────────────────────────────────────────────
-
-    def on_click(self, pos: tuple[int, int], btn: int,
-                 rects: dict[str, pygame.Rect]) -> str | None:
+    def peut_demarrer(self) -> bool:
         """
-        Handle a mouse click in the boutique screen.
-        Returns "start" when the player clicks Start with valid slots.
-        Returns None for all other interactions.
+        Vérifie si le joueur a planté au moins une graine avant de lancer la vague.
+        
+        Sortie :
+            - bool : True si la ferme contient au moins une plante, False sinon.
         """
-        _empty = pygame.Rect(0, 0, 0, 0)
+        return any(emplacement is not None for emplacement in self.types_emplacements)
 
-        # ── Right click ───────────────────────────────────────────────────────
-        if btn == 3:
-            if self.sel_seed or self.sel_equip:
-                self.sel_seed = self.sel_equip = None
+    def definir_message(self, texte: str, duree: float = 2.8) -> None:
+        """
+        Affiche un message temporaire à l'écran.
+        
+        Entrées :
+            - texte (str) : Le contenu du message.
+            - duree (float) : La durée d'affichage en secondes.
+        """
+        self.message = texte
+        self.chronometre_message = duree
+
+    def gerer_clic(self, position: tuple[int, int], bouton: int, rectangles: dict[str, pygame.Rect]) -> str | None:
+        """
+        Analyse les clics du joueur dans l'interface de la boutique (achats, ventes, placements).
+        
+        Entrées :
+            - position (tuple) : Coordonnées (X, Y) de la souris.
+            - bouton (int) : Identifiant du bouton cliqué (ex: 3 pour clic droit).
+            - rectangles (dict) : Dictionnaire contenant les hitboxes de l'interface.
+            
+        Sortie :
+            - str | None : Retourne "start" si le bouton Démarrer est validé, sinon None.
+        """
+        rect_vide = pygame.Rect(0, 0, 0, 0)
+
+        if bouton == 3:
+            if self.graine_selectionnee:
+                self.graine_selectionnee = None
                 return None
             for i in range(NB_SLOTS):
-                if rects.get(f"slot_{i}", _empty).collidepoint(pos):
-                    if self.slot_types[i]:
-                        self.slot_types[i] = None
-                        self.slots[i]      = None
-                        self.set_msg("Graine retirée.")
-                    self.epouvantails = [ep for ep in self.epouvantails
-                                        if ep.slot_index != i]
+                if rectangles.get(f"slot_{i}", rect_vide).collidepoint(position):
+                    if self.types_emplacements[i]:
+                        cout = PLANTES_DATA[self.types_emplacements[i]]["cout"]
+                        self.joueur.gagner_argent(cout)
+                        self.types_emplacements[i] = None
+                        self.plantes_actives[i] = None
+                        self.definir_message(f"Graine retirée et remboursée (+{cout} €).")
                     return None
-            for item_id in SHOP_ITEMS_ORDER:
-                if rects.get(f"item_{item_id}", _empty).collidepoint(pos):
-                    self.sell(item_id)
+            for identifiant in SHOP_ITEMS_ORDER:
+                if rectangles.get(f"item_{identifiant}", rect_vide).collidepoint(position):
+                    self.vendre(identifiant)
                     return None
             return None
 
-        # ── Debt slider ───────────────────────────────────────────────────────
-        if "debt_slider" in rects and rects["debt_slider"].collidepoint(pos):
-            sr = rects["debt_slider"]
-            ratio = max(0.0, min(1.0, (pos[0] - sr.x) / sr.width))
-            self.debt_repayment_amount = int(self.joueur.argent * ratio)
+        if "debt_slider" in rectangles and rectangles["debt_slider"].collidepoint(position):
+            rect_jauge = rectangles["debt_slider"]
+            ratio = max(0.0, min(1.0, (position[0] - rect_jauge.x) / rect_jauge.width))
+            self.montant_remboursement_dette = int(self.joueur.argent * ratio)
             return None
 
-        if "debt_reset" in rects and rects["debt_reset"].collidepoint(pos):
-            self.debt_repayment_amount = 0
+        if "debt_reset" in rectangles and rectangles["debt_reset"].collidepoint(position):
+            self.montant_remboursement_dette = 0
             return None
 
-        if "debt_confirm" in rects and rects["debt_confirm"].collidepoint(pos):
-            if self.debt_repayment_amount > 0:
-                if self.joueur.rembourser_dette(self.debt_repayment_amount):
-                    self.set_msg(f"Dette remboursée : +{self.debt_repayment_amount} €")
-                    self.debt_repayment_amount = 0
+        if "debt_confirm" in rectangles and rectangles["debt_confirm"].collidepoint(position):
+            if self.montant_remboursement_dette > 0:
+                if self.joueur.rembourser_dette(self.montant_remboursement_dette):
+                    self.definir_message(f"Dette remboursée : +{self.montant_remboursement_dette} €")
+                    self.montant_remboursement_dette = 0
                 else:
-                    self.set_msg("Pas assez d'argent !")
+                    self.definir_message("Pas assez d'argent !")
             return None
 
-        # ── Start button ──────────────────────────────────────────────────────
-        if rects.get("start",  _empty).collidepoint(pos):
-            if self.can_start():
+        if rectangles.get("start", rect_vide).collidepoint(position):
+            if self.peut_demarrer():
                 return "start"
-            self.set_msg("Achetez d'abord des graines !")
+            self.definir_message("Achetez d'abord des graines !")
             return None
 
-        # ── Slot click ────────────────────────────────────────────────────────
         for i in range(NB_SLOTS):
-            if rects.get(f"slot_{i}", _empty).collidepoint(pos):
-                self._place_in_slot(i)
+            if rectangles.get(f"slot_{i}", rect_vide).collidepoint(position):
+                self._placer_dans_emplacement(i)
                 return None
 
-        # ── Shop item click ───────────────────────────────────────────────────
-        for item_id in SHOP_ITEMS_ORDER:
-            if rects.get(f"item_{item_id}", _empty).collidepoint(pos):
-                self.buy(item_id)
+        for identifiant in SHOP_ITEMS_ORDER:
+            if rectangles.get(f"item_{identifiant}", rect_vide).collidepoint(position):
+                self.acheter(identifiant)
                 return None
 
         return None
 
-    # ── Place in slot ─────────────────────────────────────────────────────────
+    def _placer_dans_emplacement(self, index: int) -> None:
+        """
+        Place la graine sélectionnée dans le slot visé et déduit l'argent.
+        
+        Entrée :
+            - index (int) : Numéro de l'emplacement (0 à 7).
+        """
+        if self.graine_selectionnee:
+            if self.types_emplacements[index]:
+                self.definir_message("Emplacement occupé ! Clic droit pour retirer.")
+                return
+            
+            cout = PLANTES_DATA[self.graine_selectionnee]["cout"]
+            if not self.joueur.peut_acheter(cout):
+                self.definir_message(f"Pas assez d'argent ! Besoin : {cout} €")
+                return
 
-    def passer_a_la_saison_suivante(self):
-        pass
-    def _place_in_slot(self, i: int) -> None:
-        if self.sel_seed:
-            if self.slot_types[i]:
-                self.set_msg("Slot occupé ! Clic droit pour retirer.")
-                return
-            self.slot_types[i] = self.sel_seed
-            self.set_msg(f"{PLANTES_DATA[self.sel_seed]['nom']} planté dans le slot {i + 1} !")
-            self.sel_seed = None
-        elif self.sel_equip == "epouvantail":
-            if any(ep.slot_index == i for ep in self.epouvantails):
-                self.set_msg("Épouvantail déjà placé ici !")
-                return
-            self.epouvantails.append(Epouvantail(i))
-            self.set_msg(f"Épouvantail placé au slot {i + 1} !")
-            self.sel_equip = None
+            self.joueur.acheter(cout)
+            self.types_emplacements[index] = self.graine_selectionnee
+            nom_plante = PLANTES_DATA[self.graine_selectionnee]['nom']
+            self.definir_message(f"{nom_plante} planté dans l'emplacement {index + 1} !")
+            self.graine_selectionnee = None
         else:
-            self.set_msg("Sélectionnez d'abord un article.")
+            self.definir_message("Sélectionnez d'abord une graine.")
 
-    def valider_transaction(self, cout_achat):
-        pass
-    # ── Buy ───────────────────────────────────────────────────────────────────
-
-    def appliquer_impact_ecologique(self, variation_pourcentage):
-        pass
-    def buy(self, item_id: str) -> None:
-        if item_id in PLANTES_DATA:
-            d = PLANTES_DATA[item_id]
-            if not self.joueur.peut_acheter(d["cout"]):
-                self.set_msg(f"Pas assez d'argent ! Besoin : {d['cout']} €")
-                return
-            self.joueur.acheter(d["cout"])
-            self.sel_seed = item_id
-            self.seeds_bought[item_id] = self.seeds_bought.get(item_id, 0) + 1
-            self.set_msg(f"{d['nom']} acheté — cliquez sur un slot.")
+    def acheter(self, identifiant: str) -> None:
+        """
+        Gère la sélection d'une plante ou l'achat direct d'une ressource (munitions).
+        
+        Entrée :
+            - identifiant (str) : L'ID de l'objet ou de la plante dans le magasin.
+        """
+        if identifiant in PLANTES_DATA:
+            donnees = PLANTES_DATA[identifiant]
+            self.graine_selectionnee = identifiant
+            self.definir_message(f"{donnees['nom']} sélectionné — cliquez sur un emplacement pour planter.")
         else:
-            d = BOUTIQUE_ITEMS[item_id]
-            if not self.joueur.peut_acheter(d["cout"]):
-                self.set_msg(f"Pas assez d'argent ! Besoin : {d['cout']} €")
+            donnees = BOUTIQUE_ITEMS[identifiant]
+            if not self.joueur.peut_acheter(donnees["cout"]):
+                self.definir_message(f"Pas assez d'argent ! Besoin : {donnees['cout']} €")
                 return
-            self.joueur.acheter(d["cout"])
-            match d["categorie"]:
-                case "munitions":
-                    q = d["quantite"]
-                    self.joueur.munitions += q
-                    self.items_bought[item_id] = self.items_bought.get(item_id, 0) + 1
-                    self.set_msg(f"+{q} obus de compost !")
-                case "arme":
-                    q = d["quantite"]
-                    self.joueur.passages_aeriens += q
-                    self.items_bought[item_id] = self.items_bought.get(item_id, 0) + 1
-                    self.set_msg(f"+{q} passage(s) aérien(s) !")
-                case "sol":
-                    m = d["montant_sol"]
-                    self.sol.soigner(m)
-                    self.items_bought[item_id] = self.items_bought.get(item_id, 0) + 1
-                    self.set_msg(f"Sol soigné +{m}% !")
-                case "defense":
-                    self.sel_equip = "epouvantail"
-                    self.items_bought[item_id] = self.items_bought.get(item_id, 0) + 1
-                    self.set_msg("Épouvantail acheté — cliquez sur un slot.")
+            self.joueur.acheter(donnees["cout"])
+            if donnees["categorie"] == "munitions":
+                quantite = donnees["quantite"]
+                self.joueur.munitions += quantite
+                self.objets_achetes[identifiant] = self.objets_achetes.get(identifiant, 0) + 1
+                self.definir_message(f"+{quantite} obus de compost !")
 
-    def calculer_bilan_fin_saison(self, liste_plantes_survivantes):
-        pass
-    # ── Sell ──────────────────────────────────────────────────────────────────
-
-    def verifier_conditions_fin_partie(self):
-        pass
-    def sell(self, item_id: str) -> None:
-        if item_id in PLANTES_DATA:
-            d = PLANTES_DATA[item_id]
-            if self.seeds_bought.get(item_id, 0) <= 0:
-                self.set_msg(f"Vous n'avez pas de {d['nom']} à revendre !")
-                return
-            self.joueur.gagner_argent(d["cout"])
-            self.seeds_bought[item_id] -= 1
-            self.set_msg(f"{d['nom']} revendu : +{d['cout']} €")
+    def vendre(self, identifiant: str) -> None:
+        """
+        Gère la revente de ressources depuis la boutique (sauf les plantes, via clic droit sur emplacement).
+        
+        Entrée :
+            - identifiant (str) : L'ID de la ressource.
+        """
+        if identifiant in PLANTES_DATA:
+            self.definir_message("Clic droit sur un emplacement pour retirer et rembourser.")
         else:
-            d = BOUTIQUE_ITEMS[item_id]
-            match d["categorie"]:
-                case "munitions":
-                    q = d["quantite"]
-                    if self.joueur.munitions >= q and self.items_bought.get(item_id, 0) > 0:
-                        self.joueur.munitions -= q
-                        self.items_bought[item_id] -= 1
-                        self.joueur.gagner_argent(d["cout"])
-                        self.set_msg(f"-{q} obus : +{d['cout']} €")
-                    elif self.items_bought.get(item_id, 0) <= 0:
-                        self.set_msg(f"Vous n'avez pas acheté de {d['nom']} !")
-                    else:
-                        self.set_msg("Pas assez de munitions à revendre !")
-                case "arme":
-                    q = d["quantite"]
-                    if self.joueur.passages_aeriens >= q and self.items_bought.get(item_id, 0) > 0:
-                        self.joueur.passages_aeriens -= q
-                        self.items_bought[item_id] -= 1
-                        self.joueur.gagner_argent(d["cout"])
-                        self.set_msg(f"-{q} passage(s) aérien(s) : +{d['cout']} €")
-                    elif self.items_bought.get(item_id, 0) <= 0:
-                        self.set_msg(f"Vous n'avez pas acheté de {d['nom']} !")
-                    else:
-                        self.set_msg("Pas assez de passages aériens !")
-                case "sol":
-                    if self.items_bought.get(item_id, 0) > 0:
-                        self.items_bought[item_id] -= 1
-                        self.joueur.gagner_argent(d["cout"])
-                        self.set_msg(f"Crédité : +{d['cout']} €")
-                    else:
-                        self.set_msg(f"Vous n'avez pas acheté de {d['nom']} !")
-                case "defense":
-                    if self.items_bought.get(item_id, 0) > 0:
-                        self.items_bought[item_id] -= 1
-                        self.joueur.gagner_argent(d["cout"])
-                        self.set_msg(f"Crédit revente : +{d['cout']} €")
-                    else:
-                        self.set_msg("Vous n'avez pas acheté d'épouvantail !")
+            donnees = BOUTIQUE_ITEMS[identifiant]
+            if donnees["categorie"] == "munitions":
+                quantite = donnees["quantite"]
+                if self.joueur.munitions >= quantite and self.objets_achetes.get(identifiant, 0) > 0:
+                    self.joueur.munitions -= quantite
+                    self.objets_achetes[identifiant] -= 1
+                    self.joueur.gagner_argent(donnees["cout"])
+                    self.definir_message(f"-{quantite} obus : +{donnees['cout']} €")
+                elif self.objets_achetes.get(identifiant, 0) <= 0:
+                    self.definir_message(f"Vous n'avez pas acheté de {donnees['nom']} !")
+                else:
+                    self.definir_message("Pas assez de munitions à revendre !")

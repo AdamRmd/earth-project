@@ -1,101 +1,82 @@
-# utils/physique.py — Parabolic physics for compost mortar
-
 import math
-from settings import GRAVITE, VITESSE_PROJECTILE, SOL_Y, LARGEUR
+from settings import GRAVITE, SOL_Y
 
 
-def calculer_angle_pour_cible(x0, y0, xt, yt, v0=None):
+def calculer_vitesse_initiale(x_depart: float, y_depart: float, x_cible: float, y_cible: float) -> tuple[float, float]:
     """
-    Compute the launch angle (radians) for a mortar-style high arc shot.
-
-    Screen coords: y increases downward.
-    Equations of motion:
-        x(t) = x0 + v0*cos(theta)*t
-        y(t) = y0 - v0*sin(theta)*t + 0.5*g*t^2
-
-    Derived quadratic in tan(theta):
-        k*T^2 - dx*T + (k - dy) = 0
-    where k = g*dx^2/(2*v0^2), dx = xt-x0, dy = yt-y0
-
-    High arc = + sqrt(discriminant)
-    Returns angle in radians, or None if target is out of range.
+    Calcule la vélocité initiale nécessaire pour atteindre une cible donnée avec une trajectoire parabolique.
+    
+    Entrées :
+        - x_depart (float) : Position X de départ du projectile.
+        - y_depart (float) : Position Y de départ du projectile.
+        - x_cible (float) : Position X de la cible à atteindre.
+        - y_cible (float) : Position Y de la cible à atteindre.
+        
+    Sortie :
+        - tuple[float, float] : La vitesse initiale sous forme de vecteur (vitesse_x, vitesse_y).
     """
-    if v0 is None:
-        v0 = VITESSE_PROJECTILE
-
-    g = GRAVITE
-    dx = xt - x0
-    dy = yt - y0   # positive means target is BELOW launcher (screen coords)
-
-    if abs(dx) < 1:
-        return None
-
-    k = g * dx * dx / (2.0 * v0 * v0)
-    a_coef = k
-    b_coef = -dx
-    c_coef = k - dy
-
-    discriminant = b_coef * b_coef - 4 * a_coef * c_coef
-    if discriminant < 0:
-        return None
-
-    sqrt_disc = math.sqrt(discriminant)
-    tan_theta_high = (-b_coef + sqrt_disc) / (2 * a_coef)
-    tan_theta_low  = (-b_coef - sqrt_disc) / (2 * a_coef)
-
-    angle_high = math.atan(tan_theta_high)
-    angle_low  = math.atan(tan_theta_low)
-
-    if angle_high > 0.05:
-        return angle_high
-    elif angle_low > 0.05:
-        return angle_low
-    else:
-        if abs(angle_high - math.pi / 4) < abs(angle_low - math.pi / 4):
-            return angle_high
-        return angle_low
+    distance_x = x_cible - x_depart
+    distance_y = y_cible - y_depart
+    distance_totale = math.hypot(distance_x, distance_y)
+    
+    temps_vol = max(0.35, math.sqrt(distance_totale / 300.0) * 0.8)
+    
+    vitesse_x = distance_x / temps_vol
+    vitesse_y = (distance_y - 0.5 * GRAVITE * temps_vol ** 2) / temps_vol
+    
+    return vitesse_x, vitesse_y
 
 
-def calculer_position(x0, y0, angle, v0, t, g=None):
+def calculer_points_trajectoire(x_depart: float, y_depart: float, x_cible: float, y_cible: float, etapes: int = 25) -> list[tuple[int, int]]:
     """
-    Return (x, y) position at time t.
-    Screen coords: y increases downward, angle is above horizon (positive = upward).
-        x(t) = x0 + v0*cos(angle)*t
-        y(t) = y0 - v0*sin(angle)*t + 0.5*g*t^2
+    Génère une liste de points simulant la trajectoire balistique pour la prévisualisation de la visée.
+    
+    Entrées :
+        - x_depart (float) : Position X de départ.
+        - y_depart (float) : Position Y de départ.
+        - x_cible (float) : Position X de la cible.
+        - y_cible (float) : Position Y de la cible.
+        - etapes (int, optionnel) : Nombre de points à calculer. Défaut à 25.
+        
+    Sortie :
+        - list[tuple[int, int]] : Liste des coordonnées (X, Y) représentant les étapes de la trajectoire.
     """
-    if g is None:
-        g = GRAVITE
-    x = x0 + v0 * math.cos(angle) * t
-    y = y0 - v0 * math.sin(angle) * t + 0.5 * g * t * t
-    return (x, y)
-
-
-def calculer_trajectoire(x0, y0, angle, v0, dt=0.03, g=None):
-    """
-    Return a list of (x, y) screen positions sampling the trajectory every dt seconds,
-    stopping when the projectile goes below SOL_Y or off screen.
-    """
-    if g is None:
-        g = GRAVITE
-    points = []
-    t = 0.0
-    max_t = 10.0
-    while t < max_t:
-        x, y = calculer_position(x0, y0, angle, v0, t, g)
-        points.append((x, y))
-        if y > SOL_Y + 10 or x > LARGEUR + 50 or x < -50:
+    distance_x = x_cible - x_depart
+    distance_y = y_cible - y_depart
+    distance_totale = math.hypot(distance_x, distance_y)
+    
+    temps_vol = max(0.35, math.sqrt(distance_totale / 300.0) * 0.8)
+    vitesse_x = distance_x / temps_vol
+    vitesse_y = (distance_y - 0.5 * GRAVITE * temps_vol ** 2) / temps_vol
+    
+    points_trajectoire = []
+    for i in range(etapes + 1):
+        temps_actuel = temps_vol * i / etapes
+        pos_x = x_depart + vitesse_x * temps_actuel
+        pos_y = y_depart + vitesse_y * temps_actuel + 0.5 * GRAVITE * temps_actuel * temps_actuel
+        
+        if pos_y > SOL_Y:
+            points_trajectoire.append((int(pos_x), min(int(pos_y), SOL_Y)))
             break
-        t += dt
-    return points
+            
+        points_trajectoire.append((int(pos_x), int(pos_y)))
+        
+    return points_trajectoire
 
 
-def distance(x1, y1, x2, y2):
-    """Euclidean distance between two points."""
-    dx = x2 - x1
-    dy = y2 - y1
-    return math.sqrt(dx * dx + dy * dy)
-
-
-def verifier_collision(px, py, ex, ey, rayon):
-    """Return True if point (px,py) is within rayon of (ex,ey)."""
-    return distance(px, py, ex, ey) <= rayon
+def verifier_collision(x_point: float, y_point: float, x_centre: float, y_centre: float, rayon: float) -> bool:
+    """
+    Vérifie si un point donné se trouve à l'intérieur d'un cercle (collision circulaire).
+    
+    Entrées :
+        - x_point (float) : Position X du point à tester.
+        - y_point (float) : Position Y du point à tester.
+        - x_centre (float) : Position X du centre du cercle.
+        - y_centre (float) : Position Y du centre du cercle.
+        - rayon (float) : Rayon du cercle de collision.
+        
+    Sortie :
+        - bool : True si le point est dans le cercle, False sinon.
+    """
+    distance = math.hypot(x_centre - x_point, y_centre - y_point)
+    return distance <= rayon
