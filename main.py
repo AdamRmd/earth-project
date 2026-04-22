@@ -1,7 +1,7 @@
 # main.py — Green Rush : La Guerre du Potager  (v2)
-# Professional game loop with full state machine
 from __future__ import annotations
 from classes.ferme import Ferme
+from utils.physique import calculer_angle_pour_cible
 import sys
 import math
 import random
@@ -16,6 +16,7 @@ from settings import (
     ARGENT_DEPART, DETTE_CIBLE, SOL_DEPART, MUNITIONS_DEPART,
     ORANGE, ROUGE, VERT_CLAIR, JAUNE, BLANC, GRIS,
 )
+from settings import VITESSE_PROJECTILE
 from classes.joueur    import Joueur
 from classes.sol       import Sol
 from classes.ennemies  import creer_ennemi
@@ -131,14 +132,25 @@ class Game:
                     self._reset()
 
     # ── Action: shoot & plane ─────────────────────────────────────────────────
-
     def _shoot(self, pos: tuple[int, int]) -> None:
         if self.joueur.munitions <= 0:
             self._float("Plus de munitions !", MORTIER_X + 60, MORTIER_Y - 40, C_RED)
             return
-        # Utilise la position Y réelle pour un contrôle d'angle fluide
-        tx, ty = float(pos[0]), float(min(pos[1], SOL_Y - 4))
-        proj = ObuseCompost(float(MORTIER_X), float(MORTIER_Y), tx, ty, force=self.joueur.force_tir)
+
+        tx = float(pos[0])
+        ty = float(min(pos[1], SOL_Y - 4))
+
+            # La force (position X souris) module la vitesse initiale
+        v0 = VITESSE_PROJECTILE
+
+            # Calcul de l'angle balistique pour atteindre la cible
+        angle = calculer_angle_pour_cible(
+            float(MORTIER_X), float(MORTIER_Y), tx, ty, v0)
+        if angle is None:
+            self._float("Hors portée !", MORTIER_X + 60, MORTIER_Y - 40, C_RED)
+            return
+
+        proj = ObuseCompost(float(MORTIER_X), float(MORTIER_Y), angle, v0)
         self.projectiles.append(proj)
         self.joueur.munitions -= 1
 
@@ -378,32 +390,16 @@ class Game:
 
         mx, my = pygame.mouse.get_pos()
 
-        # Calcul de la puissance basé sur la position X de la souris
-        # Plus à droite = plus puissant
-        # MORTIER_X + 20 = minimum (10% de puissance)
-        # LARGEUR = maximum (100% de puissance)
-        if mx > MORTIER_X + 20:
-            # Force va de 0.1 à 1.0 basé sur la position X
-            range_x = LARGEUR - (MORTIER_X + 20)
-            force_ratio = (mx - (MORTIER_X + 20)) / range_x
-            self.joueur.force_tir = max(0.1, min(1.0, force_ratio))
-        else:
-            # Si la souris est trop à gauche, force minimale
-            self.joueur.force_tir = 0.1
-
-        # Calcul de la cible basé sur la position de la souris
-        # Position Y contrôle l'angle de tir
-        # On tire vers la position réelle du curseur pour avoir un contrôle fluide
         target_x = float(mx)
         target_y = float(min(my, SOL_Y - 4))
 
         # Trajectory preview (behind everything else)
         if self.joueur.munitions > 0 and mx > MORTIER_X + 20:
             draw_trajectory(screen, float(MORTIER_X), float(MORTIER_Y),
-                            target_x, target_y, has_ammo=True, force=self.joueur.force_tir)
+                            target_x, target_y, has_ammo=True)
         elif mx > MORTIER_X + 20:
             draw_trajectory(screen, float(MORTIER_X), float(MORTIER_Y),
-                            target_x, target_y, has_ammo=False, force=self.joueur.force_tir)
+                            target_x, target_y, has_ammo=False)
 
         # Mortar
         draw_mortier(screen, mx, my)

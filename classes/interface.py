@@ -1,7 +1,8 @@
 # classes/interface.py — Modern PvZ-style UI for Green Rush
-
 from __future__ import annotations
+
 import math
+from utils.physique import calculer_angle_pour_cible
 import random
 import pygame
 from settings import (
@@ -245,52 +246,14 @@ class Cloud:
             pass
 
 
-# ── Trajectory preview ────────────────────────────────────────────────────────
-
-def draw_trajectory(surf: pygame.Surface, x0: float, y0: float,
-                    xt: float, yt: float, has_ammo: bool, force: float = 0.5) -> None:
-    pts = ObuseCompost.preview_points(x0, y0, xt, yt, steps=26, force=force)
-    n = len(pts)
-    for i, (px, py) in enumerate(pts):
-        if i % 2 != 0:
-            continue
-        alpha = 60 + int(170 * i / n)
-        r = 2 + int(2 * i / n)
-        col = (140, 255, 90, alpha) if has_ammo else (200, 80, 80, alpha)
-        try:
-            s = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
-            pygame.draw.circle(s, col, (r, r), r)
-            surf.blit(s, (int(px) - r, int(py) - r))
-        except Exception:
-            pass
-
-
-# ── Crosshair cursor ──────────────────────────────────────────────────────────
-
-def draw_crosshair(surf: pygame.Surface, mx: int, my: int, has_ammo: bool) -> None:
-    col = (140, 255, 90) if has_ammo else (255, 80, 80)
-    dim = (70, 130, 70) if has_ammo else (130, 50, 50)
-    gap = 6
-    arm = 12
-    # Arms
-    pygame.draw.line(surf, dim, (mx - gap - arm, my), (mx - gap, my), 2)
-    pygame.draw.line(surf, dim, (mx + gap, my), (mx + gap + arm, my), 2)
-    pygame.draw.line(surf, dim, (mx, my - gap - arm), (mx, my - gap), 2)
-    pygame.draw.line(surf, dim, (mx, my + gap), (mx, my + gap + arm), 2)
-    # Center dot
-    pygame.draw.circle(surf, col, (mx, my), 3)
-    pygame.draw.circle(surf, (255, 255, 255), (mx, my), 3, 1)
-
-
 # ── Background ────────────────────────────────────────────────────────────────
 
 def draw_background(surf: pygame.Surface, sol_sante: float,
-                    clouds: list[Cloud], t: float) -> None:
+                    clouds: list, t: float) -> None:
     health_t = max(0.0, min(1.0, sol_sante / 100.0))
     top = tuple(int(C_SKY_TOP[i] * health_t + 120 * (1 - health_t)) for i in range(3))
     bot = tuple(int(C_SKY_BOT[i] * health_t + 175 * (1 - health_t)) for i in range(3))
     sky_h = SOL_Y - HUD_HAUTEUR
-    # Horizontal gradient lines
     for y in range(HUD_HAUTEUR, SOL_Y):
         f = (y - HUD_HAUTEUR) / max(1, sky_h)
         col = tuple(int(top[i] + f * (bot[i] - top[i])) for i in range(3))
@@ -308,10 +271,49 @@ def draw_background(surf: pygame.Surface, sol_sante: float,
     pygame.draw.circle(surf, (255, 220, 60), (sx, sy), 34 + pulse)
     pygame.draw.circle(surf, (255, 240, 120), (sx - 10, sy - 10), 14)
 
-    # Clouds
     for c in clouds:
         c.draw(surf)
 
+
+# ── Crosshair cursor ──────────────────────────────────────────────────────────
+
+def draw_crosshair(surf: pygame.Surface, mx: int, my: int, has_ammo: bool) -> None:
+    col = (140, 255, 90) if has_ammo else (255, 80, 80)
+    dim = (70, 130, 70) if has_ammo else (130, 50, 50)
+    gap = 6
+    arm = 12
+    pygame.draw.line(surf, dim, (mx - gap - arm, my), (mx - gap, my), 2)
+    pygame.draw.line(surf, dim, (mx + gap, my), (mx + gap + arm, my), 2)
+    pygame.draw.line(surf, dim, (mx, my - gap - arm), (mx, my - gap), 2)
+    pygame.draw.line(surf, dim, (mx, my + gap), (mx, my + gap + arm), 2)
+    pygame.draw.circle(surf, col, (mx, my), 3)
+    pygame.draw.circle(surf, (255, 255, 255), (mx, my), 3, 1)
+
+
+# ── Trajectory preview ────────────────────────────────────────────────────────
+
+def draw_trajectory(surf: pygame.Surface, x0: float, y0: float,
+                    xt: float, yt: float, has_ammo: bool,
+                    force: float = 1.0) -> None:
+    from settings import VITESSE_PROJECTILE
+    v0 = VITESSE_PROJECTILE * force
+    angle = calculer_angle_pour_cible(x0, y0, xt, yt, v0)
+    if angle is None:
+        return  # target out of range, nothing to draw
+    pts = ObuseCompost.preview_points(x0, y0, angle, v0)
+    n = len(pts)
+    for i, (px, py) in enumerate(pts):
+        if i % 2 != 0:
+            continue
+        alpha = 60 + int(170 * i / max(1, n))
+        r = 2 + int(2 * i / max(1, n))
+        col = (140, 255, 90, alpha) if has_ammo else (200, 80, 80, alpha)
+        try:
+            s = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+            pygame.draw.circle(s, col, (r, r), r)
+            surf.blit(s, (int(px) - r, int(py) - r))
+        except Exception:
+            pass
 
 # ── Mortar ────────────────────────────────────────────────────────────────────
 
